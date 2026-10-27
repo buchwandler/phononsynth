@@ -7,13 +7,16 @@ from typing import Any
 import numpy as np
 
 from ._onnxvoice import (
+    _module,
+    _optional_dependency_error,
+    _require_phonon_contract,
     install_pretrained_model,
     local_artifacts,
     open_installed_model,
 )
 from ._tokenizer import encode_text, load_tokenizer
 from .config import SynthesisConfig
-from .errors import EmptyTextError, ModelInferenceError, PhononSynthError
+from .errors import EmptyTextError, ModelInferenceError, PhononSynthError, UnsupportedModelError
 from .types import StreamChunk, SynthesisMeasure, SynthesisResult, VoiceInfo
 
 
@@ -96,14 +99,8 @@ class PhononVoice:
         session_options: Any | None = None,
     ) -> PhononVoice:
         artifacts, config = local_artifacts(bundle_dir)
-        try:
-            import onnxvoice
-        except ModuleNotFoundError as exc:
-            from .errors import OnnxVoiceContractError
-
-            raise OnnxVoiceContractError(
-                "OnnxVoice is required for local Phonon synthesis"
-            ) from exc
+        onnxvoice = _module()
+        _require_phonon_contract(onnxvoice)
         runtime = onnxvoice.OnnxVoice.open_local(
             system="phonon",
             artifacts=artifacts,
@@ -114,6 +111,19 @@ class PhononVoice:
         runtime_config = config.get("runtime") if isinstance(config.get("runtime"), Mapping) else {}
         voices = tuple(config.get("_voices", ()))
         default_voice = config.get("default_voice")
+        raw_sample_rate = runtime_config.get("sample_rate")
+        if raw_sample_rate is None:
+            sample_rate = 24000
+        elif (
+            isinstance(raw_sample_rate, bool)
+            or not isinstance(raw_sample_rate, int)
+            or raw_sample_rate <= 0
+        ):
+            raise UnsupportedModelError(
+                "local Phonon runtime.sample_rate must be a positive integer"
+            )
+        else:
+            sample_rate = raw_sample_rate
         return cls(
             runtime=runtime,
             tokenizer=load_tokenizer(artifacts["tokenizer"]),
@@ -122,7 +132,7 @@ class PhononVoice:
             model_id=None,
             voices=voices,
             default_voice=default_voice if isinstance(default_voice, str) else None,
-            sample_rate=int(runtime_config.get("sample_rate") or 24000),
+            sample_rate=sample_rate,
         )
 
     @property
@@ -223,20 +233,49 @@ class PhononVoice:
         except PhononSynthError:
             raise
         except Exception as exc:
+            dependency_error = _optional_dependency_error(exc)
+            if dependency_error is not None:
+                raise ModelInferenceError(
+                    f"Phonon model inference failed: {dependency_error}"
+                ) from exc
             raise ModelInferenceError("Phonon model inference failed") from exc
         audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
         if not np.all(np.isfinite(audio)):
             raise ValueError("audio must be finite")
         sample_rate = int(getattr(result, "sample_rate", 0) or self.sample_rate)
+        sample_rate = int(getattr(result, "sample_rate", 0) or self.sample_rate)
         runtime_metadata = getattr(result, "metadata", None)
         metadata = dict(runtime_metadata) if isinstance(runtime_metadata, Mapping) else {}
-        metadata.update(
-            {
-                "token_count": len(token_ids),
-                "model_id": self.model_id,
-                "generation": generation.runtime_kwargs(),
-            }
-        )
+        selected_quality = self.metadata.get("selected_quality")
+        selected_quality = selected_quality if isinstance(selected_quality, str) else None
+        release_tags = self.metadata.get("release_tags")
+        source_revisions = self.metadata.get("source_revisions")
+        release_versions = self.metadata.get("release_versions")
+        release_tag = (
+            release_tags.get(selected_quality)
+            if isinstance(release_tags, Mapping) and selected_quality is not None
+            else None
+        ) or self.metadata.get("release_tag")
+        source_revision = (
+            source_revisions.get(selected_quality)
+            if isinstance(source_revisions, Mapping) and selected_quality is not None
+            else None
+        ) or self.metadata.get("source_revision")
+        release_version = self.metadata.get("release_version")
+        if not isinstance(release_version, str) and isinstance(release_versions, Mapping):
+            release_version = release_versions.get(selected_quality)
+        frontend_metadata = {
+            "model_id": self.model_id,
+            "selected_quality": selected_quality,
+            "release_version": release_version,
+            "release_tag": release_tag,
+            "source_revision": source_revision,
+            "token_count": len(token_ids),
+            "generation": generation.runtime_kwargs(),
+        }
+        for key, value in frontend_metadata.items():
+            if value is not None:
+                metadata.setdefault(key, value)
         return SynthesisResult(
             audio=audio,
             sample_rate=sample_rate,
@@ -291,6 +330,11 @@ class PhononVoice:
         except PhononSynthError:
             raise
         except Exception as exc:
+            dependency_error = _optional_dependency_error(exc)
+            if dependency_error is not None:
+                raise ModelInferenceError(
+                    f"Phonon streaming inference failed: {dependency_error}"
+                ) from exc
             raise ModelInferenceError("Phonon streaming inference failed") from exc
 
     stream_text = stream_prepared

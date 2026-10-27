@@ -1,35 +1,41 @@
-# phononsynth (MVP)
+# phononsynth
 
-A small text-to-speech frontend for **Phonon**, designed to feel like `kittensynth` while keeping Phonon's streaming/generation controls visible.
+A user-facing Phonon text-to-speech frontend backed by OnnxVoice. PhononSynth loads the bundle's `tokenizer.json`, converts text to token IDs, and passes generation controls to OnnxVoice. OnnxVoice owns catalog discovery, direct-file downloads, integrity checks, cache management, and the streaming ONNX runtime.
 
-It delegates model catalogs, installation, cache integrity, ONNX Runtime sessions, the four-graph Phonon ABI, and bundled voice prompts to `onnxvoice`. `phononsynth` adds the missing text layer by loading the bundle's standard `tokenizer.json`, plus a compact Python/CLI interface.
+## Install and synthesize
 
-## Install
+Install the CPU extra, inspect the live catalog, then save a WAV:
 
 ```bash
-python -m pip install -e '.[cpu]'
+python -m pip install "phononsynth[cpu]"
+phononsynth --list-models
+phononsynth "Hello from Phonon." --model phonon-31m-en --quality q4 -o hello.wav
 ```
 
-The base package does not force a CPU or GPU ONNX Runtime provider. The published Phonon bundle catalog uses direct per-file release URLs, so managed runtime installation does not require the Hugging Face transport. The `huggingface` extra is retained only as an optional OnnxVoice capability.
+`phononsynth[cpu]` supplies the OnnxVoice CPU runtime as well as PhononSynth. Use `phononsynth[gpu]` for GPU runtime support. Normal Phonon bundle installation downloads direct per-file HTTPS release assets; it does **not** require Hugging Face. The optional `phononsynth[huggingface]` extra is only for workflows that actually use OnnxVoice's Hugging Face transport.
 
-## Managed model
+`--list-models` reads the active catalog and does not install model graphs. Its JSON includes each published model's active `release_version`, live quality choices, voices/default voice, languages, SPDX license, and commercial-use status. Available models and qualities can change with the catalog; use the values it reports rather than assuming every model supports every quality. The release version is intentionally reported from the catalog, not hardcoded here.
+
+## Python API
 
 ```python
 from phononsynth import PhononVoice
 
-with PhononVoice.from_pretrained("phonon-31m-en", quality="q4") as model:
-    result = model.synthesize_prepared(
-        "Hello from PhononSynth.",
-        voice=model.default_voice,
-        temperature=0.8,
-        seed=7,
-    )
+with PhononVoice.from_pretrained(
+    "phonon-31m-en",
+    quality="q4",
+    cache_dir="~/.cache/phononsynth",
+) as model:
+    result = model.synthesize_prepared("Hello from Phonon.", seed=7)
     result.save_wav("hello.wav")
+    print(result.metadata)  # model, quality, release/source provenance, token count, generation
 ```
 
-`quality=None` lets OnnxVoice select its catalog default (currently fp32 when present). A cold managed run may use the network.
+Use the catalog's actual quality choices. Passing `quality=None` leaves quality resolution to OnnxVoice and preserves its catalog default. Set `offline=True` with the same cache directory to reopen an already installed model without network access.
 
 ## Streaming
+
+Streaming forwards chunks directly from the runtime; it does not buffer the full utterance:
 
 ```python
 from phononsynth import PhononVoice
@@ -39,9 +45,11 @@ with PhononVoice.from_pretrained("phonon-31m-en", quality="q4") as model:
         consume(chunk.audio, chunk.sample_rate)
 ```
 
-## Local exported bundle
+Each chunk carries float32 mono audio, its sample rate, frame index, EOS status, and EOS logit when provided by the runtime.
 
-The local layout is the bundle layout produced by `phonon-onnx-bundles`:
+## Local bundle
+
+`PhononVoice.from_local()` opens a task-01 canonical bundle directly, without registering it in the managed cache:
 
 ```text
 bundle/
@@ -56,37 +64,23 @@ bundle/
     <voice>.bin
 ```
 
-Open it directly, without registering it in the OnnxVoice cache:
+The config declares `runtime.kind` and `runtime.sample_rate`; voices may be declared as a sequence or a name-to-metadata mapping. The bundle must include a `.bin` prompt for every declared voice.
 
 ```python
-from phononsynth import PhononVoice
-
 with PhononVoice.from_local(bundle_dir="bundle") as model:
     model.synthesize_prepared("Local synthesis.").save_wav("local.wav")
 ```
 
-## Discovery
+## Generation controls and text limits
 
-```python
-from phononsynth import discover_models
+The CLI exposes `--voice`, `--duration-delta`, `--temperature`, `--seed`, `--eos-threshold`, `--frames-after-eos`, `--min-frames-before-eos`, and `--max-frames`. The Python API accepts these individually or through `SynthesisConfig`, but not both in one call.
 
-for model in discover_models(language="en"):
-    print(model.id, model.quality_choices, model.voice_ids, model.license_spdx)
-```
+PhononSynth uses the installed bundle tokenizer and validates empty text before inference. The current Phonon runtime contract does not declare a maximum input-token limit, so `measure_prepared()` reports a real token count with `max_tokens=None` and `fits=None`. PhononSynth does not invent a limit or automatically split long text.
 
-Discovery only reads catalog metadata; it does not install or open model graphs.
+## Model licenses
 
-## CLI
+The Python package license and model-artifact licenses are separate. Check each model's live SPDX and `commercial_use` values in `phononsynth --list-models` before downloading or using its artifacts. The 40m checkpoints are **CC-BY-NC-4.0 and non-commercial only**. This warning is not a grant of commercial rights; comply with the model license and required notices.
 
-```bash
-phononsynth "Hello." --model phonon-31m-en --quality q4 -o hello.wav
-phononsynth --list-models
-```
+## Scope
 
-Useful controls are available directly: `--voice`, `--duration-delta`, `--temperature`, `--seed`, `--eos-threshold`, `--frames-after-eos`, `--min-frames-before-eos`, and `--max-frames`.
-
-## License boundary
-
-The Python package and model artifacts have separate licensing concerns. In the supplied bundle registry, `phonon-31m-en` is Apache-2.0, while the 40m checkpoints are CC BY-NC 4.0 and non-commercial. `discover_models()` preserves the model license/commercial-use metadata so applications can surface it before installation or use.
-
-This MVP intentionally does not implement voice cloning, pronunciation overrides, word timings, text splitting, or automatic long-form chunking. The Phonon runtime contract does not declare a maximum input-token limit, so `measure_prepared()` reports an exact token count with `max_tokens=None` and `fits=None`.
+PhononSynth is a tokenizer/frontend for Phonon's streaming generation contract. It does not implement voice cloning, pronunciation overrides, word timings, text splitting, or long-form orchestration.

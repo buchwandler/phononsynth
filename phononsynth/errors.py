@@ -15,7 +15,7 @@ class UnsupportedModelError(PhononSynthError, RuntimeError):
 
 
 class ManagedModelDependencyError(PhononSynthError, RuntimeError):
-    """Raised when managed installation lacks an optional download dependency."""
+    """Raised when managed installation lacks an optional OnnxVoice dependency."""
 
 
 class OnnxVoiceContractError(PhononSynthError, RuntimeError):

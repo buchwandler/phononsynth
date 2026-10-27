@@ -12,7 +12,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Synthesize one prepared Phonon request")
     parser.add_argument("text", nargs="?")
     parser.add_argument("--model", default="phonon-31m-en")
-    parser.add_argument("--quality", choices=("fp32", "q8", "q4", "fp16"))
+    parser.add_argument("--quality")
     parser.add_argument("--voice")
     parser.add_argument("--duration-delta", type=float)
     parser.add_argument("--temperature", type=float)
@@ -42,6 +42,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 [
                     {
                         "id": model.id,
+                        "release_version": model.release_version,
+                        "languages": model.languages,
                         "qualities": model.quality_choices,
                         "voices": model.voice_ids,
                         "default_voice": model.default_voice,

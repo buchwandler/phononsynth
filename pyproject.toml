@@ -1,16 +1,16 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68", "setuptools_scm[toml]>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "phononsynth"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Thin Phonon text-to-speech frontend backed by OnnxVoice"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.23",
-  "onnxvoice>=0.2.10,<0.3",
+  "onnxvoice>=0.2.15,<0.3",
   "tokenizers>=0.22,<0.23",
 ]
 classifiers = [
@@ -23,9 +23,9 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-huggingface = ["onnxvoice[huggingface]>=0.2.10,<0.3"]
-cpu = ["onnxvoice[cpu]>=0.2.10,<0.3"]
-gpu = ["onnxvoice[gpu]>=0.2.10,<0.3"]
+huggingface = ["onnxvoice[huggingface]>=0.2.15,<0.3"]
+cpu = ["onnxvoice[cpu]>=0.2.15,<0.3"]
+gpu = ["onnxvoice[gpu]>=0.2.15,<0.3"]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10", "build>=1"]
 
 [project.scripts]
@@ -49,3 +49,6 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"

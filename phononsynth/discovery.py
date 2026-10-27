@@ -32,10 +32,15 @@ class DiscoveredModel:
     source_revision: str | None
     license_spdx: str | None
     commercial_use: bool | None
+    release_version: str | None = None
+    release_tags: Mapping[str, str] = field(default_factory=dict)
+    source_revisions: Mapping[str, str] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        object.__setattr__(self, "release_tags", MappingProxyType(dict(self.release_tags)))
+        object.__setattr__(self, "source_revisions", MappingProxyType(dict(self.source_revisions)))
 
     @property
     def voice_ids(self) -> tuple[str, ...]:
@@ -48,6 +53,14 @@ def _strings(value: Any) -> tuple[str, ...]:
     if not isinstance(value, Sequence):
         return ()
     return tuple(str(item) for item in value if isinstance(item, str) and item)
+
+
+def _string_mapping(value: Any) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        key: item for key, item in value.items() if isinstance(key, str) and isinstance(item, str)
+    }
 
 
 def _voice(record: Any) -> DescribedVoice:
@@ -132,6 +145,11 @@ def _model(item: Any, records: tuple[Any, ...]) -> DiscoveredModel:
         if isinstance(metadata.get("license_spdx"), str)
         else None,
         commercial_use=commercial,
+        release_version=metadata.get("release_version")
+        if isinstance(metadata.get("release_version"), str)
+        else None,
+        release_tags=_string_mapping(metadata.get("release_tags")),
+        source_revisions=_string_mapping(metadata.get("source_revisions")),
         metadata=metadata,
     )
 

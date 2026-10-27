@@ -4,8 +4,9 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
+from onnxvoice.errors import OptionalDependencyError
 
-from phononsynth import EmptyTextError, PhononVoice, SynthesisConfig
+from phononsynth import EmptyTextError, ModelInferenceError, PhononVoice, SynthesisConfig
 
 
 class Encoded:
@@ -78,6 +79,70 @@ def test_synthesize_prepared_matches_kittensynth_style_surface() -> None:
     assert kwargs["voice"] == "easton"
     assert kwargs["temperature"] == 0.7
     assert kwargs["seed"] == 4
+
+
+def test_missing_onnxruntime_reports_cpu_extra_hint() -> None:
+    voice = model()
+    error = OptionalDependencyError("ONNX Runtime is not installed")
+
+    def infer(_token_ids, **_kwargs):
+        raise error
+
+    voice.runtime.infer = infer
+    with pytest.raises(ModelInferenceError, match=r"phononsynth\[cpu\]") as caught:
+        voice.synthesize_prepared("hello")
+    assert caught.value.__cause__ is error
+
+
+def test_synthesis_result_includes_release_provenance() -> None:
+    voice = model()
+    voice.metadata.update(
+        {
+            "selected_quality": "q4",
+            "release_version": "0.2.0",
+            "release_tags": {"q4": "phonon-31m-en-q4-v1"},
+            "source_revisions": {"q4": "a" * 40},
+        }
+    )
+
+    result = voice.synthesize_prepared("hello", temperature=0.7, seed=4)
+
+    assert result.metadata["model_id"] == "phonon-31m-en"
+    assert result.metadata["selected_quality"] == "q4"
+    assert result.metadata["release_version"] == "0.2.0"
+    assert result.metadata["release_tag"] == "phonon-31m-en-q4-v1"
+    assert result.metadata["source_revision"] == "a" * 40
+    assert result.metadata["token_count"] == 3
+    assert result.metadata["generation"]["seed"] == 4
+    assert result.metadata["generation"]["temperature"] == 0.7
+    assert result.metadata["ended_by_eos"] is True
+
+
+def test_runtime_metadata_wins_provenance_key_collisions() -> None:
+    voice = model()
+
+    def infer(_token_ids, **_kwargs):
+        return Result(
+            np.array([0.0, 0.25], dtype=np.float32),
+            metadata={
+                "model_id": "runtime-model-id",
+                "token_count": 99,
+                "generation": {"runtime": "metadata"},
+                "runtime_flag": True,
+            },
+        )
+
+    voice.runtime.infer = infer
+    voice.metadata.update({"selected_quality": "q4", "release_version": "0.2.0"})
+
+    result = voice.synthesize_prepared("hello", seed=4)
+
+    assert result.metadata["model_id"] == "runtime-model-id"
+    assert result.metadata["token_count"] == 99
+    assert result.metadata["generation"] == {"runtime": "metadata"}
+    assert result.metadata["runtime_flag"] is True
+    assert result.metadata["selected_quality"] == "q4"
+    assert result.metadata["release_version"] == "0.2.0"
 
 
 def test_measure_reports_unknown_runtime_limit() -> None:

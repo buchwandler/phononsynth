@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -33,6 +34,82 @@ def _module() -> Any:
     return onnxvoice
 
 
+def _require_phonon_contract(module: Any) -> None:
+    """Fail early when OnnxVoice lacks the released Phonon manager/adapter API."""
+    manager_type = getattr(module, "OnnxVoice", None)
+    missing: list[str] = []
+    if not callable(manager_type):
+        missing.append("OnnxVoice manager")
+    else:
+        required = {
+            "OnnxVoice constructor": (manager_type, ("cache_dir", "catalog_sources", "offline")),
+            "OnnxVoice.install": (
+                getattr(manager_type, "install", None),
+                ("quality", "refresh", "force", "progress"),
+            ),
+            "OnnxVoice.open": (
+                getattr(manager_type, "open", None),
+                ("providers", "provider_options", "session_options"),
+            ),
+            "OnnxVoice.open_local": (
+                getattr(manager_type, "open_local", None),
+                ("system", "artifacts", "providers", "provider_options", "session_options"),
+            ),
+        }
+        for label, (callable_obj, parameters) in required.items():
+            if not callable(callable_obj):
+                missing.append(label)
+                continue
+            try:
+                signature = inspect.signature(callable_obj)
+            except (TypeError, ValueError):
+                missing.append(f"inspectable {label} signature")
+                continue
+            accepts_keywords = any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in signature.parameters.values()
+            )
+            absent = [name for name in parameters if name not in signature.parameters]
+            if absent and not accepts_keywords:
+                missing.append(f"{label} parameters: {', '.join(absent)}")
+    try:
+        from onnxvoice.systems import get_adapter
+
+        get_adapter("phonon")
+    except Exception as exc:
+        missing.append(f"registered Phonon adapter ({exc})")
+    if missing:
+        details = "; ".join(missing)
+        raise OnnxVoiceContractError(
+            "Installed OnnxVoice does not provide the required Phonon contract "
+            f"({details}). Install a compatible release: onnxvoice>=0.2.15,<0.3."
+        )
+
+
+def _optional_dependency_error(exc: Exception) -> ManagedModelDependencyError | None:
+    try:
+        from onnxvoice.errors import OptionalDependencyError
+    except ImportError:
+        return None
+    if not isinstance(exc, OptionalDependencyError):
+        return None
+
+    detail = str(exc)
+    normalized = detail.casefold()
+    if "huggingface" in normalized or "hugging face" in normalized:
+        hint = "Install 'phononsynth[huggingface]' only when using Hugging Face downloads."
+    elif any(
+        token in normalized for token in ("onnxruntime", "onnx runtime", "execution provider")
+    ):
+        hint = "For CPU inference, install 'phononsynth[cpu]'."
+    else:
+        hint = ""
+    suffix = f" {hint}" if hint else ""
+    return ManagedModelDependencyError(
+        f"OnnxVoice reports a missing optional dependency: {detail}.{suffix}"
+    )
+
+
 def normalize_ref(value: str) -> str:
     value = str(value).strip()
     if not value:
@@ -42,6 +119,7 @@ def normalize_ref(value: str) -> str:
 
 def _manager(*, cache_dir: str | Path | None, offline: bool, catalog_url: str | None) -> Any:
     module = _module()
+    _require_phonon_contract(module)
     source = catalog_url or os.getenv("PHONONSYNTH_CATALOG_URL") or DEFAULT_CATALOG_URL
     try:
         return module.OnnxVoice(
@@ -103,16 +181,9 @@ def install_pretrained_model(
             progress=progress,
         )
     except Exception as exc:
-        try:
-            from onnxvoice.errors import OptionalDependencyError
-        except ImportError:
-            pass
-        else:
-            if isinstance(exc, OptionalDependencyError):
-                raise ManagedModelDependencyError(
-                    "Managed Phonon downloads require the Hugging Face transport; install "
-                    "phononsynth[huggingface], phononsynth[cpu], or phononsynth[gpu]."
-                ) from exc
+        dependency_error = _optional_dependency_error(exc)
+        if dependency_error is not None:
+            raise dependency_error from exc
         raise
     return installation_to_model(installation)
 
@@ -128,19 +199,12 @@ def open_installed_model(
     catalog_url: str | None = None,
 ) -> Any:
     manager = _manager(cache_dir=cache_dir, offline=offline, catalog_url=catalog_url)
-    try:
-        return manager.open(
-            resolved.installation,
-            providers=providers,
-            provider_options=provider_options,
-            session_options=session_options,
-        )
-    except Exception as exc:
-        if "phonon" in str(exc).lower() or "unsupported system" in str(exc).lower():
-            raise OnnxVoiceContractError(
-                "OnnxVoice must register a 'phonon' adapter before phononsynth can infer"
-            ) from exc
-        raise
+    return manager.open(
+        resolved.installation,
+        providers=providers,
+        provider_options=provider_options,
+        session_options=session_options,
+    )
 
 
 def local_artifacts(bundle_dir: str | Path) -> tuple[dict[str, Path], dict[str, Any]]:
@@ -165,17 +229,52 @@ def local_artifacts(bundle_dir: str | Path) -> tuple[dict[str, Path], dict[str, 
             raise UnsupportedModelError(f"local Phonon bundle is missing {path.relative_to(root)}")
         artifacts[f"model:{component}"] = path
 
+    runtime_config = config.get("runtime", {})
+    if runtime_config is not None and not isinstance(runtime_config, Mapping):
+        raise UnsupportedModelError("local Phonon config runtime must be an object")
+    if isinstance(runtime_config, Mapping) and "sample_rate" in runtime_config:
+        sample_rate = runtime_config["sample_rate"]
+        if isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or sample_rate <= 0:
+            raise UnsupportedModelError(
+                "local Phonon runtime.sample_rate must be a positive integer"
+            )
+
     raw_voices = config.get("voices")
-    if not isinstance(raw_voices, Sequence) or isinstance(raw_voices, (str, bytes)):
-        raise UnsupportedModelError("local Phonon config must declare voices")
-    voices: list[str] = []
-    for entry in raw_voices:
-        name = entry.get("name") if isinstance(entry, Mapping) else None
-        if not isinstance(name, str) or not name:
+    if isinstance(raw_voices, Mapping):
+        declarations = list(raw_voices.items())
+        if any(not isinstance(entry, Mapping) for _, entry in declarations):
+            raise UnsupportedModelError("local Phonon mapping voices must contain objects")
+    elif isinstance(raw_voices, Sequence) and not isinstance(raw_voices, (str, bytes)):
+        declarations = [
+            (entry.get("name"), entry) for entry in raw_voices if isinstance(entry, Mapping)
+        ]
+        if len(declarations) != len(raw_voices):
             raise UnsupportedModelError("local Phonon config contains an invalid voice")
+    else:
+        raise UnsupportedModelError("local Phonon config must declare voices")
+
+    voices: list[str] = []
+    for name, _entry in declarations:
+        if (
+            not isinstance(name, str)
+            or not name
+            or name != name.strip()
+            or name in {".", ".."}
+            or "/" in name
+            or "\\" in name
+            or "\x00" in name
+            or Path(name).is_absolute()
+        ):
+            raise UnsupportedModelError("local Phonon config contains an unsafe voice name")
+        if name in voices:
+            raise UnsupportedModelError(f"local Phonon config declares duplicate voice {name!r}")
         prompt = root / "voices" / f"{name}.bin"
         if not prompt.is_file():
             raise UnsupportedModelError(f"local Phonon bundle is missing voices/{name}.bin")
         artifacts[f"voice_prompt:{name}"] = prompt
         voices.append(name)
-    return artifacts, {**dict(config), "_voices": voices}
+
+    default_voice = config.get("default_voice")
+    if default_voice is not None and default_voice not in voices:
+        raise UnsupportedModelError("local Phonon default_voice must be declared in voices")
+    return artifacts, {**dict(config), "_voices": tuple(voices)}
