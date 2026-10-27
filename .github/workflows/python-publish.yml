@@ -1,0 +1,71 @@
+# Build and publish the Python package when a GitHub release is published.
+
+name: Publish Python package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Resolve expected release version
+        shell: bash
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          if [[ "$tag" == v* ]]; then
+            tag="${tag#v}"
+          fi
+          echo "EXPECTED_VERSION=$tag" >> "$GITHUB_ENV"
+      - name: Install build and test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" pytest-cov twine
+      - name: Run the release quality gate
+        run: |
+          python -m pytest
+          python -m pytest \
+            --cov=phononsynth \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-fail-under=70
+          python -m ruff check .
+          python -m ruff format --check .
+      - name: Build and validate distributions
+        run: |
+          rm -rf dist build
+          python -m build
+          python -m twine check dist/*
+      - name: Smoke test wheel in a clean environment
+        shell: bash
+        run: |
+          smoke_dir="$RUNNER_TEMP/phononsynth-release-smoke"
+          python -m venv "$smoke_dir/venv"
+          "$smoke_dir/venv/bin/python" -m pip install --upgrade pip
+          "$smoke_dir/venv/bin/python" -m pip install dist/*.whl
+          "$smoke_dir/venv/bin/python" - <<'PY'
+          import os
+          from importlib.metadata import version
+
+          expected = os.environ["EXPECTED_VERSION"]
+          actual = version("phononsynth")
+          assert actual == expected and actual != "0+unknown", (expected, actual)
+          print(actual)
+          PY
+          "$smoke_dir/venv/bin/phononsynth" --help
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@v1.13.0
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
