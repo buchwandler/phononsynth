@@ -1,0 +1,1072 @@
+ README.md                       |  72 +++++++++---------
+ phononsynth/__main__.py         |   4 +-
+ phononsynth/_onnxvoice.py       | 157 ++++++++++++++++++++++++++++++++--------
+ phononsynth/discovery.py        |  18 +++++
+ phononsynth/errors.py           |   2 +-
+ phononsynth/voice.py            |  78 +++++++++++++++-----
+ pyproject.toml                  |  15 ++--
+ tests/test_discovery.py         |  65 +++++++++++++++++
+ tests/test_local.py             | 109 +++++++++++++++++++++++++---
+ tests/test_managed.py           |  70 ++++++++++++++++++
+ tests/test_phonon_acceptance.py |  75 +++++++++++++++++++
+ tests/test_versioning.py        |  12 +++
+ tests/test_voice.py             |  67 ++++++++++++++++-
+ 13 files changed, 639 insertions(+), 105 deletions(-)
+
+diff --git a/README.md b/README.md
+index f24b3c9..ca5ca58 100644
+--- a/README.md
++++ b/README.md
+@@ -1,36 +1,42 @@
+-# phononsynth (MVP)
++# phononsynth
+
+-A small text-to-speech frontend for **Phonon**, designed to feel like `kittensynth` while keeping Phonon's streaming/generation controls visible.
++A user-facing Phonon text-to-speech frontend backed by OnnxVoice. PhononSynth loads the bundle's `tokenizer.json`, converts text to token IDs, and passes generation controls to OnnxVoice. OnnxVoice owns catalog discovery, direct-file downloads, integrity checks, cache management, and the streaming ONNX runtime.
+
+-It delegates model catalogs, installation, cache integrity, ONNX Runtime sessions, the four-graph Phonon ABI, and bundled voice prompts to `onnxvoice`. `phononsynth` adds the missing text layer by loading the bundle's standard `tokenizer.json`, plus a compact Python/CLI interface.
++## Install and synthesize
+
+-## Install
++Install the CPU extra, inspect the live catalog, then save a WAV:
+
+ ```bash
+-python -m pip install -e '.[cpu]'
++python -m pip install "phononsynth[cpu]"
++phononsynth --list-models
++phononsynth "Hello from Phonon." --model phonon-31m-en --quality q4 -o hello.wav
+ ```
+
+-The base package does not force a CPU or GPU ONNX Runtime provider. The published Phonon bundle catalog uses direct per-file release URLs, so managed runtime installation does not require the Hugging Face transport. The `huggingface` extra is retained only as an optional OnnxVoice capability.
++`phononsynth[cpu]` supplies the OnnxVoice CPU runtime as well as PhononSynth. Use `phononsynth[gpu]` for GPU runtime support. Normal Phonon bundle installation downloads direct per-file HTTPS release assets; it does **not** require Hugging Face. The optional `phononsynth[huggingface]` extra is only for workflows that actually use OnnxVoice's Hugging Face transport.
++
++`--list-models` reads the active catalog and does not install model graphs. Its JSON includes each published model's active `release_version`, live quality choices, voices/default voice, languages, SPDX license, and commercial-use status. Available models and qualities can change with the catalog; use the values it reports rather than assuming every model supports every quality. The release version is intentionally reported from the catalog, not hardcoded here.
+
+-## Managed model
++## Python API
+
+ ```python
+ from phononsynth import PhononVoice
+
+-with PhononVoice.from_pretrained("phonon-31m-en", quality="q4") as model:
+-    result = model.synthesize_prepared(
+-        "Hello from PhononSynth.",
+-        voice=model.default_voice,
+-        temperature=0.8,
+-        seed=7,
+-    )
++with PhononVoice.from_pretrained(
++    "phonon-31m-en",
++    quality="q4",
++    cache_dir="~/.cache/phononsynth",
++) as model:
++    result = model.synthesize_prepared("Hello from Phonon.", seed=7)
+     result.save_wav("hello.wav")
++    print(result.metadata)  # model, quality, release/source provenance, token count, generation
+ ```
+
+-`quality=None` lets OnnxVoice select its catalog default (currently fp32 when present). A cold managed run may use the network.
++Use the catalog's actual quality choices. Passing `quality=None` leaves quality resolution to OnnxVoice and preserves its catalog default. Set `offline=True` with the same cache directory to reopen an already installed model without network access.
+
+ ## Streaming
+
++Streaming forwards chunks directly from the runtime; it does not buffer the full utterance:
++
+ ```python
+ from phononsynth import PhononVoice
+
+@@ -39,9 +45,11 @@ with PhononVoice.from_pretrained("phonon-31m-en", quality="q4") as model:
+         consume(chunk.audio, chunk.sample_rate)
+ ```
+
+-## Local exported bundle
++Each chunk carries float32 mono audio, its sample rate, frame index, EOS status, and EOS logit when provided by the runtime.
+
+-The local layout is the bundle layout produced by `phonon-onnx-bundles`:
++## Local bundle
++
++`PhononVoice.from_local()` opens a task-01 canonical bundle directly, without registering it in the managed cache:
+
+ ```text
+ bundle/
+@@ -56,37 +64,23 @@ bundle/
+     <voice>.bin
+ ```
+
+-Open it directly, without registering it in the OnnxVoice cache:
++The config declares `runtime.kind` and `runtime.sample_rate`; voices may be declared as a sequence or a name-to-metadata mapping. The bundle must include a `.bin` prompt for every declared voice.
+
+ ```python
+-from phononsynth import PhononVoice
+-
+ with PhononVoice.from_local(bundle_dir="bundle") as model:
+     model.synthesize_prepared("Local synthesis.").save_wav("local.wav")
+ ```
+
+-## Discovery
++## Generation controls and text limits
+
+-```python
+-from phononsynth import discover_models
++The CLI exposes `--voice`, `--duration-delta`, `--temperature`, `--seed`, `--eos-threshold`, `--frames-after-eos`, `--min-frames-before-eos`, and `--max-frames`. The Python API accepts these individually or through `SynthesisConfig`, but not both in one call.
+
+-for model in discover_models(language="en"):
+-    print(model.id, model.quality_choices, model.voice_ids, model.license_spdx)
+-```
+-
+-Discovery only reads catalog metadata; it does not install or open model graphs.
+-
+-## CLI
+-
+-```bash
+-phononsynth "Hello." --model phonon-31m-en --quality q4 -o hello.wav
+-phononsynth --list-models
+-```
++PhononSynth uses the installed bundle tokenizer and validates empty text before inference. The current Phonon runtime contract does not declare a maximum input-token limit, so `measure_prepared()` reports a real token count with `max_tokens=None` and `fits=None`. PhononSynth does not invent a limit or automatically split long text.
+
+-Useful controls are available directly: `--voice`, `--duration-delta`, `--temperature`, `--seed`, `--eos-threshold`, `--frames-after-eos`, `--min-frames-before-eos`, and `--max-frames`.
++## Model licenses
+
+-## License boundary
++The Python package license and model-artifact licenses are separate. Check each model's live SPDX and `commercial_use` values in `phononsynth --list-models` before downloading or using its artifacts. The 40m checkpoints are **CC-BY-NC-4.0 and non-commercial only**. This warning is not a grant of commercial rights; comply with the model license and required notices.
+
+-The Python package and model artifacts have separate licensing concerns. In the supplied bundle registry, `phonon-31m-en` is Apache-2.0, while the 40m checkpoints are CC BY-NC 4.0 and non-commercial. `discover_models()` preserves the model license/commercial-use metadata so applications can surface it before installation or use.
++## Scope
+
+-This MVP intentionally does not implement voice cloning, pronunciation overrides, word timings, text splitting, or automatic long-form chunking. The Phonon runtime contract does not declare a maximum input-token limit, so `measure_prepared()` reports an exact token count with `max_tokens=None` and `fits=None`.
++PhononSynth is a tokenizer/frontend for Phonon's streaming generation contract. It does not implement voice cloning, pronunciation overrides, word timings, text splitting, or long-form orchestration.
+diff --git a/phononsynth/__main__.py b/phononsynth/__main__.py
+index 9633c24..3654e4c 100644
+--- a/phononsynth/__main__.py
++++ b/phononsynth/__main__.py
+@@ -12,7 +12,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+     parser = argparse.ArgumentParser(description="Synthesize one prepared Phonon request")
+     parser.add_argument("text", nargs="?")
+     parser.add_argument("--model", default="phonon-31m-en")
+-    parser.add_argument("--quality", choices=("fp32", "q8", "q4", "fp16"))
++    parser.add_argument("--quality")
+     parser.add_argument("--voice")
+     parser.add_argument("--duration-delta", type=float)
+     parser.add_argument("--temperature", type=float)
+@@ -42,6 +42,8 @@ def main(argv: Sequence[str] | None = None) -> int:
+                 [
+                     {
+                         "id": model.id,
++                        "release_version": model.release_version,
++                        "languages": model.languages,
+                         "qualities": model.quality_choices,
+                         "voices": model.voice_ids,
+                         "default_voice": model.default_voice,
+diff --git a/phononsynth/_onnxvoice.py b/phononsynth/_onnxvoice.py
+index 3f81358..316fe1d 100644
+--- a/phononsynth/_onnxvoice.py
++++ b/phononsynth/_onnxvoice.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+
++import inspect
+ import os
+ from collections.abc import Mapping, Sequence
+ from dataclasses import dataclass
+@@ -33,6 +34,82 @@ def _module() -> Any:
+     return onnxvoice
+
+
++def _require_phonon_contract(module: Any) -> None:
++    """Fail early when OnnxVoice lacks the released Phonon manager/adapter API."""
++    manager_type = getattr(module, "OnnxVoice", None)
++    missing: list[str] = []
++    if not callable(manager_type):
++        missing.append("OnnxVoice manager")
++    else:
++        required = {
++            "OnnxVoice constructor": (manager_type, ("cache_dir", "catalog_sources", "offline")),
++            "OnnxVoice.install": (
++                getattr(manager_type, "install", None),
++                ("quality", "refresh", "force", "progress"),
++            ),
++            "OnnxVoice.open": (
++                getattr(manager_type, "open", None),
++                ("providers", "provider_options", "session_options"),
++            ),
++            "OnnxVoice.open_local": (
++                getattr(manager_type, "open_local", None),
++                ("system", "artifacts", "providers", "provider_options", "session_options"),
++            ),
++        }
++        for label, (callable_obj, parameters) in required.items():
++            if not callable(callable_obj):
++                missing.append(label)
++                continue
++            try:
++                signature = inspect.signature(callable_obj)
++            except (TypeError, ValueError):
++                missing.append(f"inspectable {label} signature")
++                continue
++            accepts_keywords = any(
++                parameter.kind is inspect.Parameter.VAR_KEYWORD
++                for parameter in signature.parameters.values()
++            )
++            absent = [name for name in parameters if name not in signature.parameters]
++            if absent and not accepts_keywords:
++                missing.append(f"{label} parameters: {', '.join(absent)}")
++    try:
++        from onnxvoice.systems import get_adapter
++
++        get_adapter("phonon")
++    except Exception as exc:
++        missing.append(f"registered Phonon adapter ({exc})")
++    if missing:
++        details = "; ".join(missing)
++        raise OnnxVoiceContractError(
++            "Installed OnnxVoice does not provide the required Phonon contract "
++            f"({details}). Install a compatible release: onnxvoice>=0.2.15,<0.3."
++        )
++
++
++def _optional_dependency_error(exc: Exception) -> ManagedModelDependencyError | None:
++    try:
++        from onnxvoice.errors import OptionalDependencyError
++    except ImportError:
++        return None
++    if not isinstance(exc, OptionalDependencyError):
++        return None
++
++    detail = str(exc)
++    normalized = detail.casefold()
++    if "huggingface" in normalized or "hugging face" in normalized:
++        hint = "Install 'phononsynth[huggingface]' only when using Hugging Face downloads."
++    elif any(
++        token in normalized for token in ("onnxruntime", "onnx runtime", "execution provider")
++    ):
++        hint = "For CPU inference, install 'phononsynth[cpu]'."
++    else:
++        hint = ""
++    suffix = f" {hint}" if hint else ""
++    return ManagedModelDependencyError(
++        f"OnnxVoice reports a missing optional dependency: {detail}.{suffix}"
++    )
++
++
+ def normalize_ref(value: str) -> str:
+     value = str(value).strip()
+     if not value:
+@@ -42,6 +119,7 @@ def normalize_ref(value: str) -> str:
+
+ def _manager(*, cache_dir: str | Path | None, offline: bool, catalog_url: str | None) -> Any:
+     module = _module()
++    _require_phonon_contract(module)
+     source = catalog_url or os.getenv("PHONONSYNTH_CATALOG_URL") or DEFAULT_CATALOG_URL
+     try:
+         return module.OnnxVoice(
+@@ -103,16 +181,9 @@ def install_pretrained_model(
+             progress=progress,
+         )
+     except Exception as exc:
+-        try:
+-            from onnxvoice.errors import OptionalDependencyError
+-        except ImportError:
+-            pass
+-        else:
+-            if isinstance(exc, OptionalDependencyError):
+-                raise ManagedModelDependencyError(
+-                    "Managed Phonon downloads require the Hugging Face transport; install "
+-                    "phononsynth[huggingface], phononsynth[cpu], or phononsynth[gpu]."
+-                ) from exc
++        dependency_error = _optional_dependency_error(exc)
++        if dependency_error is not None:
++            raise dependency_error from exc
+         raise
+     return installation_to_model(installation)
+
+@@ -128,19 +199,12 @@ def open_installed_model(
+     catalog_url: str | None = None,
+ ) -> Any:
+     manager = _manager(cache_dir=cache_dir, offline=offline, catalog_url=catalog_url)
+-    try:
+-        return manager.open(
+-            resolved.installation,
+-            providers=providers,
+-            provider_options=provider_options,
+-            session_options=session_options,
+-        )
+-    except Exception as exc:
+-        if "phonon" in str(exc).lower() or "unsupported system" in str(exc).lower():
+-            raise OnnxVoiceContractError(
+-                "OnnxVoice must register a 'phonon' adapter before phononsynth can infer"
+-            ) from exc
+-        raise
++    return manager.open(
++        resolved.installation,
++        providers=providers,
++        provider_options=provider_options,
++        session_options=session_options,
++    )
+
+
+ def local_artifacts(bundle_dir: str | Path) -> tuple[dict[str, Path], dict[str, Any]]:
+@@ -165,17 +229,52 @@ def local_artifacts(bundle_dir: str | Path) -> tuple[dict[str, Path], dict[str,
+             raise UnsupportedModelError(f"local Phonon bundle is missing {path.relative_to(root)}")
+         artifacts[f"model:{component}"] = path
+
++    runtime_config = config.get("runtime", {})
++    if runtime_config is not None and not isinstance(runtime_config, Mapping):
++        raise UnsupportedModelError("local Phonon config runtime must be an object")
++    if isinstance(runtime_config, Mapping) and "sample_rate" in runtime_config:
++        sample_rate = runtime_config["sample_rate"]
++        if isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or sample_rate <= 0:
++            raise UnsupportedModelError(
++                "local Phonon runtime.sample_rate must be a positive integer"
++            )
++
+     raw_voices = config.get("voices")
+-    if not isinstance(raw_voices, Sequence) or isinstance(raw_voices, (str, bytes)):
++    if isinstance(raw_voices, Mapping):
++        declarations = list(raw_voices.items())
++        if any(not isinstance(entry, Mapping) for _, entry in declarations):
++            raise UnsupportedModelError("local Phonon mapping voices must contain objects")
++    elif isinstance(raw_voices, Sequence) and not isinstance(raw_voices, (str, bytes)):
++        declarations = [
++            (entry.get("name"), entry) for entry in raw_voices if isinstance(entry, Mapping)
++        ]
++        if len(declarations) != len(raw_voices):
++            raise UnsupportedModelError("local Phonon config contains an invalid voice")
++    else:
+         raise UnsupportedModelError("local Phonon config must declare voices")
++
+     voices: list[str] = []
+-    for entry in raw_voices:
+-        name = entry.get("name") if isinstance(entry, Mapping) else None
+-        if not isinstance(name, str) or not name:
+-            raise UnsupportedModelError("local Phonon config contains an invalid voice")
++    for name, _entry in declarations:
++        if (
++            not isinstance(name, str)
++            or not name
++            or name != name.strip()
++            or name in {".", ".."}
++            or "/" in name
++            or "\\" in name
++            or "\x00" in name
++            or Path(name).is_absolute()
++        ):
++            raise UnsupportedModelError("local Phonon config contains an unsafe voice name")
++        if name in voices:
++            raise UnsupportedModelError(f"local Phonon config declares duplicate voice {name!r}")
+         prompt = root / "voices" / f"{name}.bin"
+         if not prompt.is_file():
+             raise UnsupportedModelError(f"local Phonon bundle is missing voices/{name}.bin")
+         artifacts[f"voice_prompt:{name}"] = prompt
+         voices.append(name)
+-    return artifacts, {**dict(config), "_voices": voices}
++
++    default_voice = config.get("default_voice")
++    if default_voice is not None and default_voice not in voices:
++        raise UnsupportedModelError("local Phonon default_voice must be declared in voices")
++    return artifacts, {**dict(config), "_voices": tuple(voices)}
+diff --git a/phononsynth/discovery.py b/phononsynth/discovery.py
+index a850f67..51641c9 100644
+--- a/phononsynth/discovery.py
++++ b/phononsynth/discovery.py
+@@ -32,10 +32,15 @@ class DiscoveredModel:
+     source_revision: str | None
+     license_spdx: str | None
+     commercial_use: bool | None
++    release_version: str | None = None
++    release_tags: Mapping[str, str] = field(default_factory=dict)
++    source_revisions: Mapping[str, str] = field(default_factory=dict)
+     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+     def __post_init__(self) -> None:
+         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
++        object.__setattr__(self, "release_tags", MappingProxyType(dict(self.release_tags)))
++        object.__setattr__(self, "source_revisions", MappingProxyType(dict(self.source_revisions)))
+
+     @property
+     def voice_ids(self) -> tuple[str, ...]:
+@@ -50,6 +55,14 @@ def _strings(value: Any) -> tuple[str, ...]:
+     return tuple(str(item) for item in value if isinstance(item, str) and item)
+
+
++def _string_mapping(value: Any) -> dict[str, str]:
++    if not isinstance(value, Mapping):
++        return {}
++    return {
++        key: item for key, item in value.items() if isinstance(key, str) and isinstance(item, str)
++    }
++
++
+ def _voice(record: Any) -> DescribedVoice:
+     metadata = getattr(record, "metadata", None)
+     return DescribedVoice(
+@@ -132,6 +145,11 @@ def _model(item: Any, records: tuple[Any, ...]) -> DiscoveredModel:
+         if isinstance(metadata.get("license_spdx"), str)
+         else None,
+         commercial_use=commercial,
++        release_version=metadata.get("release_version")
++        if isinstance(metadata.get("release_version"), str)
++        else None,
++        release_tags=_string_mapping(metadata.get("release_tags")),
++        source_revisions=_string_mapping(metadata.get("source_revisions")),
+         metadata=metadata,
+     )
+
+diff --git a/phononsynth/errors.py b/phononsynth/errors.py
+index 73b47ac..3b367db 100644
+--- a/phononsynth/errors.py
++++ b/phononsynth/errors.py
+@@ -15,7 +15,7 @@ class UnsupportedModelError(PhononSynthError, RuntimeError):
+
+
+ class ManagedModelDependencyError(PhononSynthError, RuntimeError):
+-    """Raised when managed installation lacks an optional download dependency."""
++    """Raised when managed installation lacks an optional OnnxVoice dependency."""
+
+
+ class OnnxVoiceContractError(PhononSynthError, RuntimeError):
+diff --git a/phononsynth/voice.py b/phononsynth/voice.py
+index a493eb1..b8ad4e2 100644
+--- a/phononsynth/voice.py
++++ b/phononsynth/voice.py
+@@ -7,13 +7,16 @@ from typing import Any
+ import numpy as np
+
+ from ._onnxvoice import (
++    _module,
++    _optional_dependency_error,
++    _require_phonon_contract,
+     install_pretrained_model,
+     local_artifacts,
+     open_installed_model,
+ )
+ from ._tokenizer import encode_text, load_tokenizer
+ from .config import SynthesisConfig
+-from .errors import EmptyTextError, ModelInferenceError, PhononSynthError
++from .errors import EmptyTextError, ModelInferenceError, PhononSynthError, UnsupportedModelError
+ from .types import StreamChunk, SynthesisMeasure, SynthesisResult, VoiceInfo
+
+
+@@ -96,14 +99,8 @@ class PhononVoice:
+         session_options: Any | None = None,
+     ) -> PhononVoice:
+         artifacts, config = local_artifacts(bundle_dir)
+-        try:
+-            import onnxvoice
+-        except ModuleNotFoundError as exc:
+-            from .errors import OnnxVoiceContractError
+-
+-            raise OnnxVoiceContractError(
+-                "OnnxVoice is required for local Phonon synthesis"
+-            ) from exc
++        onnxvoice = _module()
++        _require_phonon_contract(onnxvoice)
+         runtime = onnxvoice.OnnxVoice.open_local(
+             system="phonon",
+             artifacts=artifacts,
+@@ -114,6 +111,19 @@ class PhononVoice:
+         runtime_config = config.get("runtime") if isinstance(config.get("runtime"), Mapping) else {}
+         voices = tuple(config.get("_voices", ()))
+         default_voice = config.get("default_voice")
++        raw_sample_rate = runtime_config.get("sample_rate")
++        if raw_sample_rate is None:
++            sample_rate = 24000
++        elif (
++            isinstance(raw_sample_rate, bool)
++            or not isinstance(raw_sample_rate, int)
++            or raw_sample_rate <= 0
++        ):
++            raise UnsupportedModelError(
++                "local Phonon runtime.sample_rate must be a positive integer"
++            )
++        else:
++            sample_rate = raw_sample_rate
+         return cls(
+             runtime=runtime,
+             tokenizer=load_tokenizer(artifacts["tokenizer"]),
+@@ -122,7 +132,7 @@ class PhononVoice:
+             model_id=None,
+             voices=voices,
+             default_voice=default_voice if isinstance(default_voice, str) else None,
+-            sample_rate=int(runtime_config.get("sample_rate") or 24000),
++            sample_rate=sample_rate,
+         )
+
+     @property
+@@ -223,20 +233,49 @@ class PhononVoice:
+         except PhononSynthError:
+             raise
+         except Exception as exc:
++            dependency_error = _optional_dependency_error(exc)
++            if dependency_error is not None:
++                raise ModelInferenceError(
++                    f"Phonon model inference failed: {dependency_error}"
++                ) from exc
+             raise ModelInferenceError("Phonon model inference failed") from exc
+         audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+         if not np.all(np.isfinite(audio)):
+             raise ValueError("audio must be finite")
+         sample_rate = int(getattr(result, "sample_rate", 0) or self.sample_rate)
++        sample_rate = int(getattr(result, "sample_rate", 0) or self.sample_rate)
+         runtime_metadata = getattr(result, "metadata", None)
+         metadata = dict(runtime_metadata) if isinstance(runtime_metadata, Mapping) else {}
+-        metadata.update(
+-            {
+-                "token_count": len(token_ids),
+-                "model_id": self.model_id,
+-                "generation": generation.runtime_kwargs(),
+-            }
+-        )
++        selected_quality = self.metadata.get("selected_quality")
++        selected_quality = selected_quality if isinstance(selected_quality, str) else None
++        release_tags = self.metadata.get("release_tags")
++        source_revisions = self.metadata.get("source_revisions")
++        release_versions = self.metadata.get("release_versions")
++        release_tag = (
++            release_tags.get(selected_quality)
++            if isinstance(release_tags, Mapping) and selected_quality is not None
++            else None
++        ) or self.metadata.get("release_tag")
++        source_revision = (
++            source_revisions.get(selected_quality)
++            if isinstance(source_revisions, Mapping) and selected_quality is not None
++            else None
++        ) or self.metadata.get("source_revision")
++        release_version = self.metadata.get("release_version")
++        if not isinstance(release_version, str) and isinstance(release_versions, Mapping):
++            release_version = release_versions.get(selected_quality)
++        frontend_metadata = {
++            "model_id": self.model_id,
++            "selected_quality": selected_quality,
++            "release_version": release_version,
++            "release_tag": release_tag,
++            "source_revision": source_revision,
++            "token_count": len(token_ids),
++            "generation": generation.runtime_kwargs(),
++        }
++        for key, value in frontend_metadata.items():
++            if value is not None:
++                metadata.setdefault(key, value)
+         return SynthesisResult(
+             audio=audio,
+             sample_rate=sample_rate,
+@@ -291,6 +330,11 @@ class PhononVoice:
+         except PhononSynthError:
+             raise
+         except Exception as exc:
++            dependency_error = _optional_dependency_error(exc)
++            if dependency_error is not None:
++                raise ModelInferenceError(
++                    f"Phonon streaming inference failed: {dependency_error}"
++                ) from exc
+             raise ModelInferenceError("Phonon streaming inference failed") from exc
+
+     stream_text = stream_prepared
+diff --git a/pyproject.toml b/pyproject.toml
+index c491e4f..0f66093 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,16 +1,16 @@
+ [build-system]
+-requires = ["setuptools>=68", "wheel"]
++requires = ["setuptools>=68", "setuptools_scm[toml]>=8", "wheel"]
+ build-backend = "setuptools.build_meta"
+
+ [project]
+ name = "phononsynth"
+-version = "0.1.0"
++dynamic = ["version"]
+ description = "Thin Phonon text-to-speech frontend backed by OnnxVoice"
+ readme = "README.md"
+ requires-python = ">=3.10"
+ dependencies = [
+   "numpy>=1.23",
+-  "onnxvoice>=0.2.10,<0.3",
++  "onnxvoice>=0.2.15,<0.3",
+   "tokenizers>=0.22,<0.23",
+ ]
+ classifiers = [
+@@ -23,9 +23,9 @@ classifiers = [
+ ]
+
+ [project.optional-dependencies]
+-huggingface = ["onnxvoice[huggingface]>=0.2.10,<0.3"]
+-cpu = ["onnxvoice[cpu]>=0.2.10,<0.3"]
+-gpu = ["onnxvoice[gpu]>=0.2.10,<0.3"]
++huggingface = ["onnxvoice[huggingface]>=0.2.15,<0.3"]
++cpu = ["onnxvoice[cpu]>=0.2.15,<0.3"]
++gpu = ["onnxvoice[gpu]>=0.2.15,<0.3"]
+ dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10", "build>=1"]
+
+ [project.scripts]
+@@ -49,3 +49,6 @@ line-length = 100
+
+ [tool.ruff.lint]
+ select = ["E", "F", "I", "UP", "B"]
++
++[tool.setuptools_scm]
++fallback_version = "0.0.0"
+diff --git a/tests/test_discovery.py b/tests/test_discovery.py
+new file mode 100644
+index 0000000..f599695
+--- /dev/null
++++ b/tests/test_discovery.py
+@@ -0,0 +1,65 @@
++from __future__ import annotations
++
++import json
++from types import SimpleNamespace
++from typing import Any
++
++from phononsynth import __main__ as cli
++from phononsynth.discovery import _model
++
++
++def catalog_model() -> Any:
++    return SimpleNamespace(
++        id="phonon-31m-en",
++        system="phonon",
++        sample_rate=24000,
++        default_voice="easton",
++        metadata={
++            "name": "Phonon 31m English",
++            "languages": ["en"],
++            "quality_profiles": ["fp16", "fp32", "q4", "q8"],
++            "voice_details": [{"id": "easton", "display_name": "Easton"}],
++            "license": {"spdx": "Apache-2.0", "commercial_use": True},
++            "release_version": "0.2.0",
++            "release_tags": {"q4": "phonon-31m-en-q4-v1"},
++            "source_revision": "a" * 40,
++            "source_revisions": {"q4": "b" * 40},
++        },
++    )
++
++
++def test_discovery_preserves_live_catalog_provenance_and_quality_choices() -> None:
++    model = _model(catalog_model(), ())
++
++    assert model.release_version == "0.2.0"
++    assert model.quality_choices == ("fp16", "fp32", "q4", "q8")
++    assert model.release_tags["q4"] == "phonon-31m-en-q4-v1"
++    assert model.source_revisions["q4"] == "b" * 40
++    assert model.source_revision == "a" * 40
++    assert model.voice_ids == ("easton",)
++    assert model.default_voice == "easton"
++    assert model.license_spdx == "Apache-2.0"
++    assert model.commercial_use is True
++
++
++def test_cli_lists_release_languages_and_catalog_values_without_fixed_quality_choices(
++    monkeypatch, capsys
++) -> None:
++    model = _model(catalog_model(), ())
++    monkeypatch.setattr(cli, "discover_models", lambda **_: (model,))
++
++    assert cli.main(["--list-models"]) == 0
++    rows = json.loads(capsys.readouterr().out)
++    assert rows == [
++        {
++            "id": "phonon-31m-en",
++            "release_version": "0.2.0",
++            "languages": ["en"],
++            "qualities": ["fp16", "fp32", "q4", "q8"],
++            "voices": ["easton"],
++            "default_voice": "easton",
++            "license": "Apache-2.0",
++            "commercial_use": True,
++        }
++    ]
++    assert cli.parse_args(["--quality", "int4"]).quality == "int4"
+diff --git a/tests/test_local.py b/tests/test_local.py
+index 2e3cfc6..8badff6 100644
+--- a/tests/test_local.py
++++ b/tests/test_local.py
+@@ -2,25 +2,52 @@ from __future__ import annotations
+
+ import json
+ from pathlib import Path
++from typing import Any
+
++import onnxvoice
++import pytest
++
++from phononsynth import PhononVoice
+ from phononsynth._onnxvoice import local_artifacts
++from phononsynth.errors import UnsupportedModelError
++
++COMPONENTS = ("text_conditioner", "flow_lm_main", "flow_lm_flow", "mimi_decoder")
+
+
+-def test_local_artifacts_match_phonon_bundle_contract(tmp_path: Path) -> None:
+-    (tmp_path / "onnx").mkdir()
+-    (tmp_path / "voices").mkdir()
++def make_bundle(root: Path, voices: Any, *, write_prompts: bool = True) -> None:
++    (root / "onnx").mkdir(parents=True)
++    (root / "voices").mkdir()
+     config = {
+-        "runtime": {"sample_rate": 24000},
+-        "voices": [{"name": "easton"}],
++        "runtime": {"kind": "phonon-streaming-onnx-v1", "sample_rate": 22050},
++        "voices": voices,
+         "default_voice": "easton",
+     }
+-    (tmp_path / "config.json").write_text(json.dumps(config), encoding="utf-8")
+-    (tmp_path / "tokenizer.json").write_text("{}", encoding="utf-8")
+-    for component in ("text_conditioner", "flow_lm_main", "flow_lm_flow", "mimi_decoder"):
+-        (tmp_path / "onnx" / f"{component}.onnx").write_bytes(b"onnx")
+-    (tmp_path / "voices" / "easton.bin").write_bytes(b"voice")
++    (root / "config.json").write_text(json.dumps(config), encoding="utf-8")
++    (root / "tokenizer.json").write_text("{}", encoding="utf-8")
++    for component in COMPONENTS:
++        (root / "onnx" / f"{component}.onnx").write_bytes(b"onnx")
++    if write_prompts:
++        if isinstance(voices, dict):
++            names = voices
++        else:
++            names = [entry["name"] for entry in voices]
++        for name in names:
++            if isinstance(name, str) and "/" not in name and "\\" not in name:
++                (root / "voices" / f"{name}.bin").write_bytes(b"voice")
++
++
++@pytest.mark.parametrize(
++    "voices",
++    [
++        [{"name": "easton"}],
++        {"easton": {"display_name": "Easton"}},
++    ],
++)
++def test_local_artifacts_accept_canonical_voice_declarations(tmp_path: Path, voices: Any) -> None:
++    make_bundle(tmp_path, voices)
+
+     artifacts, parsed = local_artifacts(tmp_path)
++
+     assert set(artifacts) == {
+         "config",
+         "tokenizer",
+@@ -30,4 +57,64 @@ def test_local_artifacts_match_phonon_bundle_contract(tmp_path: Path) -> None:
+         "model:mimi_decoder",
+         "voice_prompt:easton",
+     }
+-    assert parsed["_voices"] == ["easton"]
++    assert parsed["runtime"]["kind"] == "phonon-streaming-onnx-v1"
++    assert parsed["_voices"] == ("easton",)
++
++
++def test_from_local_passes_canonical_artifacts_to_onnxvoice(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    make_bundle(tmp_path, {"easton": {"display_name": "Easton"}})
++    captured: dict[str, Any] = {}
++    runtime = object()
++
++    def open_local(**kwargs: Any) -> Any:
++        captured.update(kwargs)
++        return runtime
++
++    monkeypatch.setattr(onnxvoice.OnnxVoice, "open_local", staticmethod(open_local))
++    monkeypatch.setattr("phononsynth.voice.load_tokenizer", lambda _path: object())
++
++    voice = PhononVoice.from_local(bundle_dir=tmp_path)
++
++    assert captured["system"] == "phonon"
++    assert set(captured["artifacts"]) == {
++        "config",
++        "tokenizer",
++        "model:text_conditioner",
++        "model:flow_lm_main",
++        "model:flow_lm_flow",
++        "model:mimi_decoder",
++        "voice_prompt:easton",
++    }
++    assert captured["artifacts"]["config"].name == "config.json"
++    assert captured["artifacts"]["tokenizer"].name == "tokenizer.json"
++    assert voice.runtime is runtime
++    assert voice.available_voices == ("easton",)
++    assert voice.sample_rate == 22050
++
++
++@pytest.mark.parametrize("name", ["../escape", r"..\\escape", "/absolute", ".."])
++def test_local_artifacts_reject_unsafe_voice_names(tmp_path: Path, name: str) -> None:
++    make_bundle(tmp_path, {name: {"display_name": "Unsafe"}}, write_prompts=False)
++
++    with pytest.raises(UnsupportedModelError, match="unsafe voice name"):
++        local_artifacts(tmp_path)
++
++
++def test_local_artifacts_reject_missing_voice_prompt(tmp_path: Path) -> None:
++    make_bundle(tmp_path, {"missing": {"display_name": "Missing"}}, write_prompts=False)
++
++    with pytest.raises(UnsupportedModelError, match="missing voices/missing.bin"):
++        local_artifacts(tmp_path)
++
++
++def test_local_artifacts_reject_invalid_configured_sample_rate(tmp_path: Path) -> None:
++    make_bundle(tmp_path, [{"name": "easton"}])
++    config_path = tmp_path / "config.json"
++    config = json.loads(config_path.read_text(encoding="utf-8"))
++    config["runtime"]["sample_rate"] = 0
++    config_path.write_text(json.dumps(config), encoding="utf-8")
++
++    with pytest.raises(UnsupportedModelError, match="runtime.sample_rate"):
++        local_artifacts(tmp_path)
+diff --git a/tests/test_managed.py b/tests/test_managed.py
+new file mode 100644
+index 0000000..b9a232f
+--- /dev/null
++++ b/tests/test_managed.py
+@@ -0,0 +1,70 @@
++from __future__ import annotations
++
++from types import SimpleNamespace
++from typing import Any
++
++import onnxvoice
++import pytest
++from onnxvoice.errors import OptionalDependencyError
++
++from phononsynth._onnxvoice import _require_phonon_contract, install_pretrained_model
++from phononsynth.errors import ManagedModelDependencyError, OnnxVoiceContractError
++
++
++class FailingManager:
++    def __init__(self, error: Exception) -> None:
++        self.error = error
++
++    def install(self, *_: Any, **__: Any) -> Any:
++        raise self.error
++
++
++def test_released_onnxvoice_exposes_phonon_contract() -> None:
++    _require_phonon_contract(onnxvoice)
++
++
++def test_phonon_contract_rejects_missing_manager_capabilities() -> None:
++    class LegacyManager:
++        def __init__(self) -> None:
++            pass
++
++    with pytest.raises(OnnxVoiceContractError, match="onnxvoice>=0.2.15"):
++        _require_phonon_contract(SimpleNamespace(OnnxVoice=LegacyManager))
++
++
++@pytest.mark.parametrize(
++    ("message", "expected_hint", "forbidden_hint"),
++    [
++        (
++            "Hugging Face downloads require huggingface_hub",
++            "phononsynth[huggingface]",
++            "phononsynth[cpu]",
++        ),
++        (
++            "ONNX Runtime is not installed",
++            "phononsynth[cpu]",
++            "phononsynth[huggingface]",
++        ),
++        (
++            "Optional plugin dependency is missing",
++            "Optional plugin dependency is missing",
++            "phononsynth[huggingface]",
++        ),
++    ],
++)
++def test_optional_dependency_errors_preserve_context_without_false_transport_claim(
++    monkeypatch: pytest.MonkeyPatch,
++    message: str,
++    expected_hint: str,
++    forbidden_hint: str,
++) -> None:
++    import phononsynth._onnxvoice as bridge
++
++    error = OptionalDependencyError(message)
++    monkeypatch.setattr(bridge, "_manager", lambda **_: FailingManager(error))
++    with pytest.raises(ManagedModelDependencyError) as caught:
++        install_pretrained_model("phonon-31m-en")
++    assert message in str(caught.value)
++    assert expected_hint in str(caught.value)
++    assert forbidden_hint not in str(caught.value)
++    assert isinstance(caught.value.__cause__, OptionalDependencyError)
+diff --git a/tests/test_phonon_acceptance.py b/tests/test_phonon_acceptance.py
+new file mode 100644
+index 0000000..483437b
+--- /dev/null
++++ b/tests/test_phonon_acceptance.py
+@@ -0,0 +1,75 @@
++from __future__ import annotations
++
++import importlib.util
++import os
++from pathlib import Path
++from typing import NoReturn
++
++import numpy as np
++import pytest
++
++from phononsynth import PhononVoice, discover_models
++
++_RUN_ACCEPTANCE = os.environ.get("PHONONSYNTH_PHONON_ACCEPTANCE") == "1"
++_REQUIRE_ACCEPTANCE = os.environ.get("PHONONSYNTH_REQUIRE_PHONON_ACCEPTANCE") == "1"
++
++
++def _unavailable(message: str) -> NoReturn:
++    if _REQUIRE_ACCEPTANCE:
++        pytest.fail(message)
++    pytest.skip(message)
++
++
++def test_real_phonon_managed_cpu_synthesis_and_offline_reopen(tmp_path: Path) -> None:
++    """Opt in to a live catalog install, CPU inference, and cache-only reopen."""
++    if not (_RUN_ACCEPTANCE or _REQUIRE_ACCEPTANCE):
++        pytest.skip("set PHONONSYNTH_PHONON_ACCEPTANCE=1 to run the real Phonon acceptance")
++    if importlib.util.find_spec("onnxruntime") is None:
++        _unavailable("onnxruntime is required; install phononsynth[cpu]")
++
++    cache_dir = tmp_path / "cache"
++    try:
++        models = discover_models(cache_dir=cache_dir)
++    except Exception as exc:
++        _unavailable(f"could not load the published Phonon catalog: {exc}")
++    selected = next((item for item in models if item.id == "phonon-31m-en"), None)
++    if selected is None:
++        _unavailable("phonon-31m-en is not currently published in the active catalog")
++    if not selected.quality_choices:
++        _unavailable("phonon-31m-en has no published quality profiles")
++    quality = "q4" if "q4" in selected.quality_choices else selected.quality_choices[0]
++    assert isinstance(selected.release_version, str) and selected.release_version
++
++    with PhononVoice.from_pretrained(
++        selected.id,
++        quality=quality,
++        cache_dir=cache_dir,
++        providers="cpu",
++    ) as model:
++        assert model.default_voice in model.available_voices
++        result = model.synthesize_prepared("Hello.", seed=1)
++        assert result.audio.dtype == np.float32
++        assert result.audio.ndim == 1
++        assert result.audio.size > 0
++        assert np.isfinite(result.audio).all()
++        assert result.sample_rate > 0
++        assert result.voice == model.default_voice
++        assert result.metadata["model_id"] == selected.id
++        assert result.metadata["selected_quality"] == quality
++        assert result.metadata["release_version"] == selected.release_version
++        assert result.metadata["release_tag"] == selected.release_tags[quality]
++        assert result.metadata["source_revision"] == selected.source_revisions[quality]
++
++    with PhononVoice.from_pretrained(
++        selected.id,
++        quality=quality,
++        cache_dir=cache_dir,
++        offline=True,
++        providers="cpu",
++    ) as offline_model:
++        assert offline_model.available_voices
++        assert offline_model.default_voice in offline_model.available_voices
++        offline_result = offline_model.synthesize_prepared("Hello.", seed=1)
++        assert offline_result.audio.size > 0
++        assert np.isfinite(offline_result.audio).all()
++        assert offline_result.metadata["release_version"] == selected.release_version
+diff --git a/tests/test_versioning.py b/tests/test_versioning.py
+new file mode 100644
+index 0000000..578eacb
+--- /dev/null
++++ b/tests/test_versioning.py
+@@ -0,0 +1,12 @@
++from importlib.metadata import PackageNotFoundError, version
++
++import phononsynth
++
++
++def test_public_version_matches_distribution_metadata() -> None:
++    try:
++        distribution_version = version("phononsynth")
++    except PackageNotFoundError:
++        assert phononsynth.__version__ == "0+unknown"
++    else:
++        assert phononsynth.__version__ == distribution_version
+diff --git a/tests/test_voice.py b/tests/test_voice.py
+index c52e3c5..2a45d40 100644
+--- a/tests/test_voice.py
++++ b/tests/test_voice.py
+@@ -4,8 +4,9 @@ from dataclasses import dataclass
+
+ import numpy as np
+ import pytest
++from onnxvoice.errors import OptionalDependencyError
+
+-from phononsynth import EmptyTextError, PhononVoice, SynthesisConfig
++from phononsynth import EmptyTextError, ModelInferenceError, PhononVoice, SynthesisConfig
+
+
+ class Encoded:
+@@ -80,6 +81,70 @@ def test_synthesize_prepared_matches_kittensynth_style_surface() -> None:
+     assert kwargs["seed"] == 4
+
+
++def test_missing_onnxruntime_reports_cpu_extra_hint() -> None:
++    voice = model()
++    error = OptionalDependencyError("ONNX Runtime is not installed")
++
++    def infer(_token_ids, **_kwargs):
++        raise error
++
++    voice.runtime.infer = infer
++    with pytest.raises(ModelInferenceError, match=r"phononsynth\[cpu\]") as caught:
++        voice.synthesize_prepared("hello")
++    assert caught.value.__cause__ is error
++
++
++def test_synthesis_result_includes_release_provenance() -> None:
++    voice = model()
++    voice.metadata.update(
++        {
++            "selected_quality": "q4",
++            "release_version": "0.2.0",
++            "release_tags": {"q4": "phonon-31m-en-q4-v1"},
++            "source_revisions": {"q4": "a" * 40},
++        }
++    )
++
++    result = voice.synthesize_prepared("hello", temperature=0.7, seed=4)
++
++    assert result.metadata["model_id"] == "phonon-31m-en"
++    assert result.metadata["selected_quality"] == "q4"
++    assert result.metadata["release_version"] == "0.2.0"
++    assert result.metadata["release_tag"] == "phonon-31m-en-q4-v1"
++    assert result.metadata["source_revision"] == "a" * 40
++    assert result.metadata["token_count"] == 3
++    assert result.metadata["generation"]["seed"] == 4
++    assert result.metadata["generation"]["temperature"] == 0.7
++    assert result.metadata["ended_by_eos"] is True
++
++
++def test_runtime_metadata_wins_provenance_key_collisions() -> None:
++    voice = model()
++
++    def infer(_token_ids, **_kwargs):
++        return Result(
++            np.array([0.0, 0.25], dtype=np.float32),
++            metadata={
++                "model_id": "runtime-model-id",
++                "token_count": 99,
++                "generation": {"runtime": "metadata"},
++                "runtime_flag": True,
++            },
++        )
++
++    voice.runtime.infer = infer
++    voice.metadata.update({"selected_quality": "q4", "release_version": "0.2.0"})
++
++    result = voice.synthesize_prepared("hello", seed=4)
++
++    assert result.metadata["model_id"] == "runtime-model-id"
++    assert result.metadata["token_count"] == 99
++    assert result.metadata["generation"] == {"runtime": "metadata"}
++    assert result.metadata["runtime_flag"] is True
++    assert result.metadata["selected_quality"] == "q4"
++    assert result.metadata["release_version"] == "0.2.0"
++
++
+ def test_measure_reports_unknown_runtime_limit() -> None:
+     measure = model().measure_prepared("hello")
+     assert measure.token_count == 3

@@ -1,0 +1,68 @@
+rows:
+  - sha: 66cf052fb4b264f563e8c13c4a04d6f3447b9a5b
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/architecture.md
+      - examples/basic.py
+      - phononsynth/__init__.py
+      - phononsynth/__main__.py
+      - phononsynth/_onnxvoice.py
+      - phononsynth/discovery.py
+      - phononsynth/voice.py
+    observed_behavior: Added Python and command-line interfaces for Phonon synthesis, including catalog discovery, managed and local models, streaming, and WAV output
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: 8f57be3ebbb78ee45d1e2c10b7df3b1749c51998
+    inspected: true
+    inspected_paths:
+      - README.md
+      - phononsynth/_onnxvoice.py
+      - phononsynth/discovery.py
+      - phononsynth/errors.py
+      - phononsynth/voice.py
+      - pyproject.toml
+      - tests/test_discovery.py
+      - tests/test_local.py
+      - tests/test_managed.py
+      - tests/test_voice.py
+    observed_behavior: Added catalog-provided release and source provenance, accepted live quality profiles, validated local voice declarations, and aligned calls with the current OnnxVoice Phonon contract
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: 9fb09bf337ed0748796143a95a87b6b5aaff3700
+    inspected: true
+    inspected_paths:
+      - .github/workflows/codecov.yml
+      - .github/workflows/pre-commit.yml
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+    observed_behavior: Added automated cross-platform tests, coverage and lint checks, and package publishing on GitHub release publication
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: CI and package release automation do not directly change user-facing product behavior
+    stale: false
+  - sha: c86735ecf7618c82d89e7d4415b02c2112d4e263
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/architecture.md
+      - phononsynth/config.py
+      - phononsynth/voice.py
+      - tests/test_voice.py
+    observed_behavior: Uses declared bundle generation defaults when available and Phonon-compatible fallbacks for omitted controls
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

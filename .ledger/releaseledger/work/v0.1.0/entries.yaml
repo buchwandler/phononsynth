@@ -1,0 +1,61 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.1.0
+git_base_ref: b0176154de751b99430065308b5556aa66beb472
+git_base_sha: b0176154de751b99430065308b5556aa66beb472
+git_head_ref: c86735ecf7618c82d89e7d4415b02c2112d4e263
+git_head_sha: c86735ecf7618c82d89e7d4415b02c2112d4e263
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: Added Phonon speech synthesis APIs and CLI with managed/local models, catalog discovery, streaming, and WAV output
+    status: accepted
+    source_refs:
+      - git:66cf052fb4b264f563e8c13c4a04d6f3447b9a5b
+    paths:
+      - phononsynth/__init__.py
+      - phononsynth/__main__.py
+      - phononsynth/discovery.py
+      - phononsynth/voice.py
+      - README.md
+    sources:
+      - git:66cf052fb4b264f563e8c13c4a04d6f3447b9a5b
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary: Improved OnnxVoice compatibility, live quality and provenance reporting, and local bundle validation
+    status: accepted
+    source_refs:
+      - git:8f57be3ebbb78ee45d1e2c10b7df3b1749c51998
+    paths:
+      - README.md
+      - phononsynth/_onnxvoice.py
+      - phononsynth/discovery.py
+      - phononsynth/voice.py
+      - pyproject.toml
+    sources:
+      - git:8f57be3ebbb78ee45d1e2c10b7df3b1749c51998
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary: Improved generation defaults using bundle settings or Phonon-compatible fallbacks
+    status: accepted
+    source_refs:
+      - git:c86735ecf7618c82d89e7d4415b02c2112d4e263
+    paths:
+      - README.md
+      - docs/architecture.md
+      - phononsynth/config.py
+      - phononsynth/voice.py
+    sources:
+      - git:c86735ecf7618c82d89e7d4415b02c2112d4e263
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

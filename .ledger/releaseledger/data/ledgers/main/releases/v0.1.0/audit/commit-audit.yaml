@@ -1,0 +1,171 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.1.0
+git_base_ref: b017615
+git_base_sha: b0176154de751b99430065308b5556aa66beb472
+git_head_ref: HEAD
+git_head_sha: c86735ecf7618c82d89e7d4415b02c2112d4e263
+git_range: b0176154de751b99430065308b5556aa66beb472..c86735ecf7618c82d89e7d4415b02c2112d4e263
+commit_count: 4
+rows:
+  - sha: 66cf052fb4b264f563e8c13c4a04d6f3447b9a5b
+    source_ref: git:66cf052fb4b264f563e8c13c4a04d6f3447b9a5b
+    short_sha: 66cf052
+    changed_paths:
+      - .codecrate.toml
+      - .gitignore
+      - .ledger/ledger.toml
+      - .ledger/releaseledger/.ledger-project.toml
+      - .ledger/releaseledger/config.toml
+      - .ledger/releaseledger/data/.ledger-project.toml
+      - .ledger/taskledger/.ledger-project.toml
+      - .ledger/taskledger/config.toml
+      - .pre-commit-config.yaml
+      - NOTICE.md
+      - README.md
+      - SOURCE_NOTES.md
+      - docs/architecture.md
+      - examples/basic.py
+      - phononsynth/__init__.py
+      - phononsynth/__main__.py
+      - phononsynth/_onnxvoice.py
+      - phononsynth/_tokenizer.py
+      - phononsynth/api_contract.py
+      - phononsynth/config.py
+      - phononsynth/discovery.py
+      - phononsynth/errors.py
+      - phononsynth/identity.py
+      - phononsynth/py.typed
+      - phononsynth/types.py
+      - phononsynth/voice.py
+      - pyproject.toml
+      - tests/test_api.py
+      - tests/test_config.py
+      - tests/test_local.py
+      - tests/test_voice.py
+    stats:
+      files_changed: 31
+      insertions: 1645
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/architecture.md
+      - examples/basic.py
+      - phononsynth/__init__.py
+      - phononsynth/__main__.py
+      - phononsynth/_onnxvoice.py
+      - phononsynth/discovery.py
+      - phononsynth/voice.py
+    observed_behavior:
+      Added Python and command-line interfaces for Phonon synthesis,
+      including catalog discovery, managed and local models, streaming, and WAV output
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: initial version"
+    target_entry_id: entry-0001
+    notes: ""
+  - sha: 8f57be3ebbb78ee45d1e2c10b7df3b1749c51998
+    source_ref: git:8f57be3ebbb78ee45d1e2c10b7df3b1749c51998
+    short_sha: 8f57be3
+    changed_paths:
+      - README.md
+      - phononsynth/__main__.py
+      - phononsynth/_onnxvoice.py
+      - phononsynth/discovery.py
+      - phononsynth/errors.py
+      - phononsynth/voice.py
+      - pyproject.toml
+      - tests/test_discovery.py
+      - tests/test_local.py
+      - tests/test_managed.py
+      - tests/test_phonon_acceptance.py
+      - tests/test_versioning.py
+      - tests/test_voice.py
+    stats:
+      files_changed: 13
+      insertions: 639
+      deletions: 105
+    inspected: true
+    inspected_paths:
+      - README.md
+      - phononsynth/_onnxvoice.py
+      - phononsynth/discovery.py
+      - phononsynth/errors.py
+      - phononsynth/voice.py
+      - pyproject.toml
+      - tests/test_discovery.py
+      - tests/test_local.py
+      - tests/test_managed.py
+      - tests/test_voice.py
+    observed_behavior:
+      Added catalog-provided release and source provenance, accepted
+      live quality profiles, validated local voice declarations, and aligned calls with
+      the current OnnxVoice Phonon contract
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: prepare first release"
+    target_entry_id: entry-0002
+    notes: ""
+  - sha: 9fb09bf337ed0748796143a95a87b6b5aaff3700
+    source_ref: git:9fb09bf337ed0748796143a95a87b6b5aaff3700
+    short_sha: 9fb09bf
+    changed_paths:
+      - .github/workflows/codecov.yml
+      - .github/workflows/pre-commit.yml
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+    stats:
+      files_changed: 4
+      insertions: 172
+      deletions: 0
+    inspected: true
+    inspected_paths:
+      - .github/workflows/codecov.yml
+      - .github/workflows/pre-commit.yml
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+    observed_behavior:
+      Added automated cross-platform tests, coverage and lint checks,
+      and package publishing on GitHub release publication
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "chore: ci"
+    notes:
+      CI and package release automation do not directly change user-facing product
+      behavior
+  - sha: c86735ecf7618c82d89e7d4415b02c2112d4e263
+    source_ref: git:c86735ecf7618c82d89e7d4415b02c2112d4e263
+    short_sha: c86735e
+    changed_paths:
+      - README.md
+      - docs/architecture.md
+      - phononsynth/config.py
+      - phononsynth/voice.py
+      - tests/test_voice.py
+    stats:
+      files_changed: 5
+      insertions: 102
+      deletions: 7
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/architecture.md
+      - phononsynth/config.py
+      - phononsynth/voice.py
+      - tests/test_voice.py
+    observed_behavior:
+      Uses declared bundle generation defaults when available and Phonon-compatible
+      fallbacks for omitted controls
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: fix voice"
+    target_entry_id: entry-0003
+    notes: ""

@@ -1,0 +1,110 @@
+{
+  "candidate_count": 4,
+  "candidates": [
+    {
+      "additions": 1645,
+      "deletions": 1,
+      "patch_file": "66cf052.patch",
+      "patch_sha256": "2d83068ea289d426ce685068ef2a763c9b45f958b8ee1ff7fb713166655dc8fe",
+      "paths": [
+        ".codecrate.toml",
+        ".gitignore",
+        ".ledger/ledger.toml",
+        ".ledger/releaseledger/.ledger-project.toml",
+        ".ledger/releaseledger/config.toml",
+        ".ledger/releaseledger/data/.ledger-project.toml",
+        ".ledger/taskledger/.ledger-project.toml",
+        ".ledger/taskledger/config.toml",
+        ".pre-commit-config.yaml",
+        "NOTICE.md",
+        "README.md",
+        "SOURCE_NOTES.md",
+        "docs/architecture.md",
+        "examples/basic.py",
+        "phononsynth/__init__.py",
+        "phononsynth/__main__.py",
+        "phononsynth/_onnxvoice.py",
+        "phononsynth/_tokenizer.py",
+        "phononsynth/api_contract.py",
+        "phononsynth/config.py",
+        "phononsynth/discovery.py",
+        "phononsynth/errors.py",
+        "phononsynth/identity.py",
+        "phononsynth/py.typed",
+        "phononsynth/types.py",
+        "phononsynth/voice.py",
+        "pyproject.toml",
+        "tests/test_api.py",
+        "tests/test_config.py",
+        "tests/test_local.py",
+        "tests/test_voice.py"
+      ],
+      "sha": "66cf052fb4b264f563e8c13c4a04d6f3447b9a5b",
+      "short_sha": "66cf052",
+      "source_ref": "git:66cf052fb4b264f563e8c13c4a04d6f3447b9a5b"
+    },
+    {
+      "additions": 639,
+      "deletions": 105,
+      "patch_file": "8f57be3.patch",
+      "patch_sha256": "51ccdae932d09610716a24472ecd1f73b17bd70126c97d9665e41f993de6d8b2",
+      "paths": [
+        "README.md",
+        "phononsynth/__main__.py",
+        "phononsynth/_onnxvoice.py",
+        "phononsynth/discovery.py",
+        "phononsynth/errors.py",
+        "phononsynth/voice.py",
+        "pyproject.toml",
+        "tests/test_discovery.py",
+        "tests/test_local.py",
+        "tests/test_managed.py",
+        "tests/test_phonon_acceptance.py",
+        "tests/test_versioning.py",
+        "tests/test_voice.py"
+      ],
+      "sha": "8f57be3ebbb78ee45d1e2c10b7df3b1749c51998",
+      "short_sha": "8f57be3",
+      "source_ref": "git:8f57be3ebbb78ee45d1e2c10b7df3b1749c51998"
+    },
+    {
+      "additions": 172,
+      "deletions": 0,
+      "patch_file": "9fb09bf.patch",
+      "patch_sha256": "369aabf615d28e0aba48628864acbd47509771645529c791dd9cfd49f291efc4",
+      "paths": [
+        ".github/workflows/codecov.yml",
+        ".github/workflows/pre-commit.yml",
+        ".github/workflows/python-publish.yml",
+        ".github/workflows/tests.yml"
+      ],
+      "sha": "9fb09bf337ed0748796143a95a87b6b5aaff3700",
+      "short_sha": "9fb09bf",
+      "source_ref": "git:9fb09bf337ed0748796143a95a87b6b5aaff3700"
+    },
+    {
+      "additions": 102,
+      "deletions": 7,
+      "patch_file": "c86735e.patch",
+      "patch_sha256": "e8343b8589c0b52392ba75941118f438a864000fbab860c8ed85a552b9d4f04f",
+      "paths": [
+        "README.md",
+        "docs/architecture.md",
+        "phononsynth/config.py",
+        "phononsynth/voice.py",
+        "tests/test_voice.py"
+      ],
+      "sha": "c86735ecf7618c82d89e7d4415b02c2112d4e263",
+      "short_sha": "c86735e",
+      "source_ref": "git:c86735ecf7618c82d89e7d4415b02c2112d4e263"
+    }
+  ],
+  "git_base_ref": "b0176154de751b99430065308b5556aa66beb472",
+  "git_base_sha": "b0176154de751b99430065308b5556aa66beb472",
+  "git_head_ref": "c86735ecf7618c82d89e7d4415b02c2112d4e263",
+  "git_head_sha": "c86735ecf7618c82d89e7d4415b02c2112d4e263",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.1.0",
+  "schema_version": 1
+}

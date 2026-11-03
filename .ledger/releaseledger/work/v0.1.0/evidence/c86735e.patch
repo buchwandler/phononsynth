@@ -1,0 +1,213 @@
+ README.md             |  2 +-
+ docs/architecture.md  |  2 +-
+ phononsynth/config.py |  2 +-
+ phononsynth/voice.py  | 56 +++++++++++++++++++++++++++++++++++++++++++++++----
+ tests/test_voice.py   | 47 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 102 insertions(+), 7 deletions(-)
+
+diff --git a/README.md b/README.md
+index ca5ca58..f034005 100644
+--- a/README.md
++++ b/README.md
+@@ -73,7 +73,7 @@ with PhononVoice.from_local(bundle_dir="bundle") as model:
+
+ ## Generation controls and text limits
+
+-The CLI exposes `--voice`, `--duration-delta`, `--temperature`, `--seed`, `--eos-threshold`, `--frames-after-eos`, `--min-frames-before-eos`, and `--max-frames`. The Python API accepts these individually or through `SynthesisConfig`, but not both in one call.
++The CLI exposes `--voice`, `--duration-delta`, `--temperature`, `--seed`, `--eos-threshold`, `--frames-after-eos`, `--min-frames-before-eos`, and `--max-frames`. The Python API accepts these individually or through `SynthesisConfig`, but not both in one call. Unset controls use bundle defaults when present. Missing controls use Phonon-compatible defaults, including temperature 0.3, one frame after EOS, six frames before EOS detection, and a token-length-based frame cap.
+
+ PhononSynth uses the installed bundle tokenizer and validates empty text before inference. The current Phonon runtime contract does not declare a maximum input-token limit, so `measure_prepared()` reports a real token count with `max_tokens=None` and `fits=None`. PhononSynth does not invent a limit or automatically split long text.
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 57d5512..4ce4d3a 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -20,4 +20,4 @@ onnxvoice PhononAdapter
+ 24 kHz float32 PCM / streaming frames
+ ```
+
+-`phononsynth` owns only the text-facing convenience layer. OnnxVoice owns catalogs, installation, verification, provider selection, sessions, the runtime ABI, voice prompt loading, generation defaults, and diagnostics.
++`phononsynth` owns the text-facing convenience layer and fills generation controls omitted by older bundles with Phonon-compatible defaults. OnnxVoice owns catalogs, installation, verification, provider selection, sessions, the runtime ABI, voice prompt loading, bundle generation defaults, and diagnostics.
+diff --git a/phononsynth/config.py b/phononsynth/config.py
+index 4018e42..11845f7 100644
+--- a/phononsynth/config.py
++++ b/phononsynth/config.py
+@@ -29,7 +29,7 @@ def _int_optional(value: int | None, name: str, *, minimum: int) -> int | None:
+ class SynthesisConfig:
+     """Optional Phonon generation overrides.
+
+-    ``None`` means: use the selected bundle's declared default.
++    ``None`` uses the selected bundle default, or a Phonon-compatible fallback when absent.
+     """
+
+     duration_delta: float | None = None
+diff --git a/phononsynth/voice.py b/phononsynth/voice.py
+index b8ad4e2..dad0ddb 100644
+--- a/phononsynth/voice.py
++++ b/phononsynth/voice.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+
++import math
+ from collections.abc import Iterator, Mapping, Sequence
+ from pathlib import Path
+ from typing import Any
+@@ -124,10 +125,18 @@ class PhononVoice:
+             )
+         else:
+             sample_rate = raw_sample_rate
++        generation = config.get("generation")
++        if not isinstance(generation, Mapping):
++            onnx_config = config.get("onnx")
++            generation = onnx_config.get("generation") if isinstance(onnx_config, Mapping) else None
+         return cls(
+             runtime=runtime,
+             tokenizer=load_tokenizer(artifacts["tokenizer"]),
+-            metadata={"runtime": dict(runtime_config), "local_bundle": str(Path(bundle_dir))},
++            metadata={
++                "runtime": dict(runtime_config),
++                "generation": dict(generation) if isinstance(generation, Mapping) else {},
++                "local_bundle": str(Path(bundle_dir)),
++            },
+             model_ref=None,
+             model_id=None,
+             voices=voices,
+@@ -187,6 +196,43 @@ class PhononVoice:
+             return config.validated()
+         return SynthesisConfig(**overrides).validated()
+
++    def _generation_kwargs(
++        self, generation: SynthesisConfig, token_count: int
++    ) -> dict[str, object | None]:
++        kwargs = generation.runtime_kwargs()
++        bundle_generation = self.metadata.get("generation")
++        if not isinstance(bundle_generation, Mapping):
++            bundle_generation = {}
++
++        defaults = {
++            "duration_delta": (("duration_delta_default", "duration_delta"), 0.0),
++            "temperature": (("temperature_default", "temperature"), 0.3),
++            "eos_threshold": (("eos_threshold_default", "eos_threshold"), 4.0),
++            "frames_after_eos": (("frames_after_eos",), 1),
++            "min_frames_before_eos": (("min_frames_before_eos",), 6),
++        }
++        for name, (bundle_names, fallback) in defaults.items():
++            if kwargs[name] is None:
++                for bundle_name in bundle_names:
++                    if bundle_name in bundle_generation:
++                        kwargs[name] = bundle_generation[bundle_name]
++                        break
++                if kwargs[name] is None:
++                    kwargs[name] = fallback
++
++        if kwargs["max_frames"] is None:
++            for bundle_name in ("max_frames", "max_frames_default"):
++                if bundle_name in bundle_generation:
++                    kwargs["max_frames"] = bundle_generation[bundle_name]
++                    break
++            if kwargs["max_frames"] is None:
++                runtime = self.metadata.get("runtime")
++                frame_rate = (
++                    runtime.get("frame_rate", 12.5) if isinstance(runtime, Mapping) else 12.5
++                )
++                kwargs["max_frames"] = math.ceil((token_count / 3 + 2) * float(frame_rate))
++        return kwargs
++
+     def _voice(self, voice: str | None) -> str:
+         selected = voice or self.default_voice
+         if selected is None:
+@@ -224,11 +270,12 @@ class PhononVoice:
+                 "max_frames": max_frames,
+             },
+         )
++        generation_kwargs = self._generation_kwargs(generation, len(token_ids))
+         try:
+             result = self.runtime.infer(
+                 token_ids,
+                 voice=selected_voice,
+-                **generation.runtime_kwargs(),
++                **generation_kwargs,
+             )
+         except PhononSynthError:
+             raise
+@@ -271,7 +318,7 @@ class PhononVoice:
+             "release_tag": release_tag,
+             "source_revision": source_revision,
+             "token_count": len(token_ids),
+-            "generation": generation.runtime_kwargs(),
++            "generation": generation_kwargs,
+         }
+         for key, value in frontend_metadata.items():
+             if value is not None:
+@@ -314,11 +361,12 @@ class PhononVoice:
+                 "max_frames": max_frames,
+             },
+         )
++        generation_kwargs = self._generation_kwargs(generation, len(token_ids))
+         try:
+             for chunk in self.runtime.stream(
+                 token_ids,
+                 voice=selected_voice,
+-                **generation.runtime_kwargs(),
++                **generation_kwargs,
+             ):
+                 yield StreamChunk(
+                     audio=chunk.audio,
+diff --git a/tests/test_voice.py b/tests/test_voice.py
+index 2a45d40..ccd6397 100644
+--- a/tests/test_voice.py
++++ b/tests/test_voice.py
+@@ -81,6 +81,53 @@ def test_synthesize_prepared_matches_kittensynth_style_surface() -> None:
+     assert kwargs["seed"] == 4
+
+
++def test_missing_bundle_generation_defaults_use_phonon_defaults() -> None:
++    voice = model()
++    result = voice.synthesize_prepared("hello")
++    _, kwargs = voice.runtime.calls[-1]
++
++    assert kwargs == {
++        "voice": "easton",
++        "duration_delta": 0.0,
++        "temperature": 0.3,
++        "seed": None,
++        "eos_threshold": 4.0,
++        "frames_after_eos": 1,
++        "min_frames_before_eos": 6,
++        "max_frames": 38,
++    }
++    assert result.metadata["generation"] == {
++        key: value for key, value in kwargs.items() if key != "voice"
++    }
++
++
++def test_declared_bundle_generation_defaults_take_precedence() -> None:
++    voice = model()
++    voice.metadata.update(
++        {
++            "runtime": {"frame_rate": 10.0},
++            "generation": {
++                "duration_delta_default": 0.25,
++                "temperature_default": 0.6,
++                "eos_threshold_default": 3.5,
++                "frames_after_eos": 2,
++                "min_frames_before_eos": 4,
++                "max_frames": 99,
++            },
++        }
++    )
++
++    voice.synthesize_prepared("hello")
++    _, kwargs = voice.runtime.calls[-1]
++
++    assert kwargs["duration_delta"] == 0.25
++    assert kwargs["temperature"] == 0.6
++    assert kwargs["eos_threshold"] == 3.5
++    assert kwargs["frames_after_eos"] == 2
++    assert kwargs["min_frames_before_eos"] == 4
++    assert kwargs["max_frames"] == 99
++
++
+ def test_missing_onnxruntime_reports_cpu_extra_hint() -> None:
+     voice = model()
+     error = OptionalDependencyError("ONNX Runtime is not installed")
