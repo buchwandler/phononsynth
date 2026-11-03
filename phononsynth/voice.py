@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -124,10 +125,18 @@ class PhononVoice:
             )
         else:
             sample_rate = raw_sample_rate
+        generation = config.get("generation")
+        if not isinstance(generation, Mapping):
+            onnx_config = config.get("onnx")
+            generation = onnx_config.get("generation") if isinstance(onnx_config, Mapping) else None
         return cls(
             runtime=runtime,
             tokenizer=load_tokenizer(artifacts["tokenizer"]),
-            metadata={"runtime": dict(runtime_config), "local_bundle": str(Path(bundle_dir))},
+            metadata={
+                "runtime": dict(runtime_config),
+                "generation": dict(generation) if isinstance(generation, Mapping) else {},
+                "local_bundle": str(Path(bundle_dir)),
+            },
             model_ref=None,
             model_id=None,
             voices=voices,
@@ -187,6 +196,43 @@ class PhononVoice:
             return config.validated()
         return SynthesisConfig(**overrides).validated()
 
+    def _generation_kwargs(
+        self, generation: SynthesisConfig, token_count: int
+    ) -> dict[str, object | None]:
+        kwargs = generation.runtime_kwargs()
+        bundle_generation = self.metadata.get("generation")
+        if not isinstance(bundle_generation, Mapping):
+            bundle_generation = {}
+
+        defaults = {
+            "duration_delta": (("duration_delta_default", "duration_delta"), 0.0),
+            "temperature": (("temperature_default", "temperature"), 0.3),
+            "eos_threshold": (("eos_threshold_default", "eos_threshold"), 4.0),
+            "frames_after_eos": (("frames_after_eos",), 1),
+            "min_frames_before_eos": (("min_frames_before_eos",), 6),
+        }
+        for name, (bundle_names, fallback) in defaults.items():
+            if kwargs[name] is None:
+                for bundle_name in bundle_names:
+                    if bundle_name in bundle_generation:
+                        kwargs[name] = bundle_generation[bundle_name]
+                        break
+                if kwargs[name] is None:
+                    kwargs[name] = fallback
+
+        if kwargs["max_frames"] is None:
+            for bundle_name in ("max_frames", "max_frames_default"):
+                if bundle_name in bundle_generation:
+                    kwargs["max_frames"] = bundle_generation[bundle_name]
+                    break
+            if kwargs["max_frames"] is None:
+                runtime = self.metadata.get("runtime")
+                frame_rate = (
+                    runtime.get("frame_rate", 12.5) if isinstance(runtime, Mapping) else 12.5
+                )
+                kwargs["max_frames"] = math.ceil((token_count / 3 + 2) * float(frame_rate))
+        return kwargs
+
     def _voice(self, voice: str | None) -> str:
         selected = voice or self.default_voice
         if selected is None:
@@ -224,11 +270,12 @@ class PhononVoice:
                 "max_frames": max_frames,
             },
         )
+        generation_kwargs = self._generation_kwargs(generation, len(token_ids))
         try:
             result = self.runtime.infer(
                 token_ids,
                 voice=selected_voice,
-                **generation.runtime_kwargs(),
+                **generation_kwargs,
             )
         except PhononSynthError:
             raise
@@ -271,7 +318,7 @@ class PhononVoice:
             "release_tag": release_tag,
             "source_revision": source_revision,
             "token_count": len(token_ids),
-            "generation": generation.runtime_kwargs(),
+            "generation": generation_kwargs,
         }
         for key, value in frontend_metadata.items():
             if value is not None:
@@ -314,11 +361,12 @@ class PhononVoice:
                 "max_frames": max_frames,
             },
         )
+        generation_kwargs = self._generation_kwargs(generation, len(token_ids))
         try:
             for chunk in self.runtime.stream(
                 token_ids,
                 voice=selected_voice,
-                **generation.runtime_kwargs(),
+                **generation_kwargs,
             ):
                 yield StreamChunk(
                     audio=chunk.audio,

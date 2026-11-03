@@ -20,4 +20,4 @@ onnxvoice PhononAdapter
 24 kHz float32 PCM / streaming frames
 ```
 
-`phononsynth` owns only the text-facing convenience layer. OnnxVoice owns catalogs, installation, verification, provider selection, sessions, the runtime ABI, voice prompt loading, generation defaults, and diagnostics.
+`phononsynth` owns the text-facing convenience layer and fills generation controls omitted by older bundles with Phonon-compatible defaults. OnnxVoice owns catalogs, installation, verification, provider selection, sessions, the runtime ABI, voice prompt loading, bundle generation defaults, and diagnostics.

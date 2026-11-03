@@ -81,6 +81,53 @@ def test_synthesize_prepared_matches_kittensynth_style_surface() -> None:
     assert kwargs["seed"] == 4
 
 
+def test_missing_bundle_generation_defaults_use_phonon_defaults() -> None:
+    voice = model()
+    result = voice.synthesize_prepared("hello")
+    _, kwargs = voice.runtime.calls[-1]
+
+    assert kwargs == {
+        "voice": "easton",
+        "duration_delta": 0.0,
+        "temperature": 0.3,
+        "seed": None,
+        "eos_threshold": 4.0,
+        "frames_after_eos": 1,
+        "min_frames_before_eos": 6,
+        "max_frames": 38,
+    }
+    assert result.metadata["generation"] == {
+        key: value for key, value in kwargs.items() if key != "voice"
+    }
+
+
+def test_declared_bundle_generation_defaults_take_precedence() -> None:
+    voice = model()
+    voice.metadata.update(
+        {
+            "runtime": {"frame_rate": 10.0},
+            "generation": {
+                "duration_delta_default": 0.25,
+                "temperature_default": 0.6,
+                "eos_threshold_default": 3.5,
+                "frames_after_eos": 2,
+                "min_frames_before_eos": 4,
+                "max_frames": 99,
+            },
+        }
+    )
+
+    voice.synthesize_prepared("hello")
+    _, kwargs = voice.runtime.calls[-1]
+
+    assert kwargs["duration_delta"] == 0.25
+    assert kwargs["temperature"] == 0.6
+    assert kwargs["eos_threshold"] == 3.5
+    assert kwargs["frames_after_eos"] == 2
+    assert kwargs["min_frames_before_eos"] == 4
+    assert kwargs["max_frames"] == 99
+
+
 def test_missing_onnxruntime_reports_cpu_extra_hint() -> None:
     voice = model()
     error = OptionalDependencyError("ONNX Runtime is not installed")

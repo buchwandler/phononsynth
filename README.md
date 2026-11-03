@@ -73,7 +73,7 @@ with PhononVoice.from_local(bundle_dir="bundle") as model:
 
 ## Generation controls and text limits
 
-The CLI exposes `--voice`, `--duration-delta`, `--temperature`, `--seed`, `--eos-threshold`, `--frames-after-eos`, `--min-frames-before-eos`, and `--max-frames`. The Python API accepts these individually or through `SynthesisConfig`, but not both in one call.
+The CLI exposes `--voice`, `--duration-delta`, `--temperature`, `--seed`, `--eos-threshold`, `--frames-after-eos`, `--min-frames-before-eos`, and `--max-frames`. The Python API accepts these individually or through `SynthesisConfig`, but not both in one call. Unset controls use bundle defaults when present. Missing controls use Phonon-compatible defaults, including temperature 0.3, one frame after EOS, six frames before EOS detection, and a token-length-based frame cap.
 
 PhononSynth uses the installed bundle tokenizer and validates empty text before inference. The current Phonon runtime contract does not declare a maximum input-token limit, so `measure_prepared()` reports a real token count with `max_tokens=None` and `fits=None`. PhononSynth does not invent a limit or automatically split long text.
 

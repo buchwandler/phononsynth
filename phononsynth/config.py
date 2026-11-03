@@ -29,7 +29,7 @@ def _int_optional(value: int | None, name: str, *, minimum: int) -> int | None:
 class SynthesisConfig:
     """Optional Phonon generation overrides.
 
-    ``None`` means: use the selected bundle's declared default.
+    ``None`` uses the selected bundle default, or a Phonon-compatible fallback when absent.
     """
 
     duration_delta: float | None = None
