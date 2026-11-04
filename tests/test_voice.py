@@ -14,7 +14,11 @@ class Encoded:
 
 
 class Tokenizer:
+    def __init__(self) -> None:
+        self.encoded_texts: list[str] = []
+
     def encode(self, text: str, add_special_tokens: bool = True) -> Encoded:
+        self.encoded_texts.append(text)
         assert text
         assert add_special_tokens is True
         return Encoded()
@@ -192,11 +196,21 @@ def test_runtime_metadata_wins_provenance_key_collisions() -> None:
     assert result.metadata["release_version"] == "0.2.0"
 
 
-def test_measure_reports_unknown_runtime_limit() -> None:
-    measure = model().measure_prepared("hello")
+def test_measurement_preserves_prepared_text_without_runtime_inference() -> None:
+    voice = model()
+    text = "First prepared paragraph.\n\nSecond prepared paragraph."
+
+    measure = voice.measure_prepared(text)
+    assert voice.tokenizer.encoded_texts == [text]
     assert measure.token_count == 3
     assert measure.max_tokens is None
     assert measure.fits is None
+    assert voice.runtime.calls == []
+
+    voice.synthesize_prepared(text)
+    assert voice.tokenizer.encoded_texts == [text, text]
+    assert len(voice.runtime.calls) == 1
+    assert voice.runtime.calls[0][0] == (1, 2, 3)
 
 
 def test_stream_wraps_runtime_chunks() -> None:

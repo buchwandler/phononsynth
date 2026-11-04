@@ -102,6 +102,8 @@ class PhononVoice:
         artifacts, config = local_artifacts(bundle_dir)
         onnxvoice = _module()
         _require_phonon_contract(onnxvoice)
+        if not isinstance(config, Mapping):
+            raise UnsupportedModelError("local Phonon bundle config must be a mapping")
         runtime = onnxvoice.OnnxVoice.open_local(
             system="phonon",
             artifacts=artifacts,
@@ -109,7 +111,10 @@ class PhononVoice:
             provider_options=provider_options,
             session_options=session_options,
         )
-        runtime_config = config.get("runtime") if isinstance(config.get("runtime"), Mapping) else {}
+        raw_runtime_config = config.get("runtime")
+        runtime_config: Mapping[str, Any] = (
+            raw_runtime_config if isinstance(raw_runtime_config, Mapping) else {}
+        )
         voices = tuple(config.get("_voices", ()))
         default_voice = config.get("default_voice")
         raw_sample_rate = runtime_config.get("sample_rate")
@@ -125,16 +130,21 @@ class PhononVoice:
             )
         else:
             sample_rate = raw_sample_rate
-        generation = config.get("generation")
-        if not isinstance(generation, Mapping):
+        raw_generation = config.get("generation")
+        if not isinstance(raw_generation, Mapping):
             onnx_config = config.get("onnx")
-            generation = onnx_config.get("generation") if isinstance(onnx_config, Mapping) else None
+            raw_generation = (
+                onnx_config.get("generation") if isinstance(onnx_config, Mapping) else None
+            )
+        generation_config: dict[str, Any] = {}
+        if isinstance(raw_generation, Mapping):
+            generation_config = dict(raw_generation)
         return cls(
             runtime=runtime,
             tokenizer=load_tokenizer(artifacts["tokenizer"]),
             metadata={
                 "runtime": dict(runtime_config),
-                "generation": dict(generation) if isinstance(generation, Mapping) else {},
+                "generation": generation_config,
                 "local_bundle": str(Path(bundle_dir)),
             },
             model_ref=None,
@@ -289,7 +299,6 @@ class PhononVoice:
         audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
         if not np.all(np.isfinite(audio)):
             raise ValueError("audio must be finite")
-        sample_rate = int(getattr(result, "sample_rate", 0) or self.sample_rate)
         sample_rate = int(getattr(result, "sample_rate", 0) or self.sample_rate)
         runtime_metadata = getattr(result, "metadata", None)
         metadata = dict(runtime_metadata) if isinstance(runtime_metadata, Mapping) else {}

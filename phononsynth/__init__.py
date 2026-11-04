@@ -3,7 +3,7 @@
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
 
-from .api_contract import REQUEST_API_VERSION, request_api_contract
+from .api_contract import REQUEST_API_VERSION, RequestApiContract, request_api_contract
 from .config import SynthesisConfig
 from .discovery import DescribedVoice, DiscoveredModel, discover_models
 from .errors import (
@@ -31,6 +31,7 @@ __all__ = [
     "__version__",
     "REQUEST_API_VERSION",
     "PhononVoice",
+    "RequestApiContract",
     "SynthesisConfig",
     "SynthesisResult",
     "SynthesisMeasure",

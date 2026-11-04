@@ -52,3 +52,8 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.setuptools_scm]
 fallback_version = "0.0.0"
+
+[[tool.mypy.overrides]]
+module = ["onnxvoice", "onnxvoice.*", "tokenizers", "tokenizers.*"]
+ignore_missing_imports = true
+disable_error_code = ["import-untyped"]

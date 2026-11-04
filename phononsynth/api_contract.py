@@ -1,9 +1,31 @@
 from __future__ import annotations
 
-REQUEST_API_VERSION = "1"
+from typing import TypedDict
+
+REQUEST_API_VERSION = 1
 
 
-def request_api_contract() -> dict[str, object]:
+class RequestApiFeatures(TypedDict):
+    named_voices: bool
+    streaming: bool
+    voice_cloning: bool
+    word_timings: bool
+    automatic_chunking: bool
+
+
+class RequestApiContract(TypedDict):
+    version: int
+    engine: str
+    entrypoint: str
+    stream_entrypoint: str
+    measure_entrypoint: str
+    input: str
+    measurement_unit: str
+    max_input_tokens: int | None
+    features: RequestApiFeatures
+
+
+def request_api_contract() -> RequestApiContract:
     return {
         "version": REQUEST_API_VERSION,
         "engine": "phonon",
