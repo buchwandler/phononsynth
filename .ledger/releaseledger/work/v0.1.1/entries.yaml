@@ -1,0 +1,29 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.1.1
+git_base_ref: 2bf9562cab7a2070263acc85041a7b10859e94f6
+git_base_sha: 2bf9562cab7a2070263acc85041a7b10859e94f6
+git_head_ref: 0d81378ebedd973246c2db26b86cf994aeed92b0
+git_head_sha: 0d81378ebedd973246c2db26b86cf994aeed92b0
+include_merges: nontrivial
+entries:
+  - kind: changed
+    summary: Improved voicerender integration support with a typed request API contract and hardened local Phonon bundle validation
+    status: accepted
+    source_refs:
+      - git:0d81378ebedd973246c2db26b86cf994aeed92b0
+    paths:
+      - phononsynth/__init__.py
+      - phononsynth/api_contract.py
+      - phononsynth/voice.py
+      - pyproject.toml
+      - tests/test_api.py
+      - tests/test_voice.py
+    sources:
+      - git:0d81378ebedd973246c2db26b86cf994aeed92b0
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

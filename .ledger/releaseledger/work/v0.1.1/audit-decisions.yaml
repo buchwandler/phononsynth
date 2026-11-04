@@ -1,0 +1,18 @@
+rows:
+  - sha: 0d81378ebedd973246c2db26b86cf994aeed92b0
+    inspected: true
+    inspected_paths:
+      - phononsynth/__init__.py
+      - phononsynth/api_contract.py
+      - phononsynth/voice.py
+      - pyproject.toml
+      - tests/test_api.py
+      - tests/test_voice.py
+    observed_behavior: >-
+      Exposed a typed request API contract for voicerender integrations and added defensive validation and metadata handling for local Phonon bundles.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: Public API and local bundle compatibility improvements are covered by the release entry.
+    stale: false

@@ -1,0 +1,46 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.1.1
+git_base_ref: v0.1.0
+git_base_sha: 2bf9562cab7a2070263acc85041a7b10859e94f6
+git_head_ref: HEAD
+git_head_sha: 0d81378ebedd973246c2db26b86cf994aeed92b0
+git_range: 2bf9562cab7a2070263acc85041a7b10859e94f6..0d81378ebedd973246c2db26b86cf994aeed92b0
+commit_count: 1
+rows:
+  - sha: 0d81378ebedd973246c2db26b86cf994aeed92b0
+    source_ref: git:0d81378ebedd973246c2db26b86cf994aeed92b0
+    short_sha: 0d81378
+    changed_paths:
+      - phononsynth/__init__.py
+      - phononsynth/api_contract.py
+      - phononsynth/voice.py
+      - pyproject.toml
+      - tests/test_api.py
+      - tests/test_voice.py
+    stats:
+      files_changed: 6
+      insertions: 121
+      deletions: 12
+    inspected: true
+    inspected_paths:
+      - phononsynth/__init__.py
+      - phononsynth/api_contract.py
+      - phononsynth/voice.py
+      - pyproject.toml
+      - tests/test_api.py
+      - tests/test_voice.py
+    observed_behavior:
+      Exposed a typed request API contract for voicerender integrations
+      and added defensive validation and metadata handling for local Phonon bundles.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: prepare for voicerender"
+    target_entry_id: entry-0001
+    notes:
+      Public API and local bundle compatibility improvements are covered by the
+      release entry.

@@ -1,0 +1,258 @@
+ phononsynth/__init__.py     |  3 ++-
+ phononsynth/api_contract.py | 26 ++++++++++++++++++--
+ phononsynth/voice.py        | 21 +++++++++++-----
+ pyproject.toml              |  5 ++++
+ tests/test_api.py           | 60 ++++++++++++++++++++++++++++++++++++++++++++-
+ tests/test_voice.py         | 18 ++++++++++++--
+ 6 files changed, 121 insertions(+), 12 deletions(-)
+
+diff --git a/phononsynth/__init__.py b/phononsynth/__init__.py
+index 6077c12..76bb460 100644
+--- a/phononsynth/__init__.py
++++ b/phononsynth/__init__.py
+@@ -3,7 +3,7 @@
+ from importlib.metadata import PackageNotFoundError
+ from importlib.metadata import version as _distribution_version
+
+-from .api_contract import REQUEST_API_VERSION, request_api_contract
++from .api_contract import REQUEST_API_VERSION, RequestApiContract, request_api_contract
+ from .config import SynthesisConfig
+ from .discovery import DescribedVoice, DiscoveredModel, discover_models
+ from .errors import (
+@@ -31,6 +31,7 @@ __all__ = [
+     "__version__",
+     "REQUEST_API_VERSION",
+     "PhononVoice",
++    "RequestApiContract",
+     "SynthesisConfig",
+     "SynthesisResult",
+     "SynthesisMeasure",
+diff --git a/phononsynth/api_contract.py b/phononsynth/api_contract.py
+index 01cd169..416e1e8 100644
+--- a/phononsynth/api_contract.py
++++ b/phononsynth/api_contract.py
+@@ -1,9 +1,31 @@
+ from __future__ import annotations
+
+-REQUEST_API_VERSION = "1"
++from typing import TypedDict
+
++REQUEST_API_VERSION = 1
+
+-def request_api_contract() -> dict[str, object]:
++
++class RequestApiFeatures(TypedDict):
++    named_voices: bool
++    streaming: bool
++    voice_cloning: bool
++    word_timings: bool
++    automatic_chunking: bool
++
++
++class RequestApiContract(TypedDict):
++    version: int
++    engine: str
++    entrypoint: str
++    stream_entrypoint: str
++    measure_entrypoint: str
++    input: str
++    measurement_unit: str
++    max_input_tokens: int | None
++    features: RequestApiFeatures
++
++
++def request_api_contract() -> RequestApiContract:
+     return {
+         "version": REQUEST_API_VERSION,
+         "engine": "phonon",
+diff --git a/phononsynth/voice.py b/phononsynth/voice.py
+index dad0ddb..888aebb 100644
+--- a/phononsynth/voice.py
++++ b/phononsynth/voice.py
+@@ -102,6 +102,8 @@ class PhononVoice:
+         artifacts, config = local_artifacts(bundle_dir)
+         onnxvoice = _module()
+         _require_phonon_contract(onnxvoice)
++        if not isinstance(config, Mapping):
++            raise UnsupportedModelError("local Phonon bundle config must be a mapping")
+         runtime = onnxvoice.OnnxVoice.open_local(
+             system="phonon",
+             artifacts=artifacts,
+@@ -109,7 +111,10 @@ class PhononVoice:
+             provider_options=provider_options,
+             session_options=session_options,
+         )
+-        runtime_config = config.get("runtime") if isinstance(config.get("runtime"), Mapping) else {}
++        raw_runtime_config = config.get("runtime")
++        runtime_config: Mapping[str, Any] = (
++            raw_runtime_config if isinstance(raw_runtime_config, Mapping) else {}
++        )
+         voices = tuple(config.get("_voices", ()))
+         default_voice = config.get("default_voice")
+         raw_sample_rate = runtime_config.get("sample_rate")
+@@ -125,16 +130,21 @@ class PhononVoice:
+             )
+         else:
+             sample_rate = raw_sample_rate
+-        generation = config.get("generation")
+-        if not isinstance(generation, Mapping):
++        raw_generation = config.get("generation")
++        if not isinstance(raw_generation, Mapping):
+             onnx_config = config.get("onnx")
+-            generation = onnx_config.get("generation") if isinstance(onnx_config, Mapping) else None
++            raw_generation = (
++                onnx_config.get("generation") if isinstance(onnx_config, Mapping) else None
++            )
++        generation_config: dict[str, Any] = {}
++        if isinstance(raw_generation, Mapping):
++            generation_config = dict(raw_generation)
+         return cls(
+             runtime=runtime,
+             tokenizer=load_tokenizer(artifacts["tokenizer"]),
+             metadata={
+                 "runtime": dict(runtime_config),
+-                "generation": dict(generation) if isinstance(generation, Mapping) else {},
++                "generation": generation_config,
+                 "local_bundle": str(Path(bundle_dir)),
+             },
+             model_ref=None,
+@@ -290,7 +300,6 @@ class PhononVoice:
+         if not np.all(np.isfinite(audio)):
+             raise ValueError("audio must be finite")
+         sample_rate = int(getattr(result, "sample_rate", 0) or self.sample_rate)
+-        sample_rate = int(getattr(result, "sample_rate", 0) or self.sample_rate)
+         runtime_metadata = getattr(result, "metadata", None)
+         metadata = dict(runtime_metadata) if isinstance(runtime_metadata, Mapping) else {}
+         selected_quality = self.metadata.get("selected_quality")
+diff --git a/pyproject.toml b/pyproject.toml
+index 0f66093..467a7df 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -52,3 +52,8 @@ select = ["E", "F", "I", "UP", "B"]
+
+ [tool.setuptools_scm]
+ fallback_version = "0.0.0"
++
++[[tool.mypy.overrides]]
++module = ["onnxvoice", "onnxvoice.*", "tokenizers", "tokenizers.*"]
++ignore_missing_imports = true
++disable_error_code = ["import-untyped"]
+diff --git a/tests/test_api.py b/tests/test_api.py
+index 160c02c..ccdd1f8 100644
+--- a/tests/test_api.py
++++ b/tests/test_api.py
+@@ -1,3 +1,5 @@
++from __future__ import annotations
++
+ import phononsynth
+
+
+@@ -8,11 +10,67 @@ def test_public_surface() -> None:
+         "SynthesisResult",
+         "SynthesisMeasure",
+         "StreamChunk",
++        "DiscoveredModel",
++        "DescribedVoice",
+         "discover_models",
+         "runtime_identity",
++        "REQUEST_API_VERSION",
++        "RequestApiContract",
+         "request_api_contract",
+     }
+     assert expected.issubset(set(phononsynth.__all__))
++
++
++def test_request_api_contract_v1() -> None:
++    assert phononsynth.REQUEST_API_VERSION == 1
++    assert type(phononsynth.REQUEST_API_VERSION) is int
++
+     contract = phononsynth.request_api_contract()
++    assert isinstance(contract, dict)
++    assert contract["version"] == 1
++    assert type(contract["version"]) is int
+     assert contract["engine"] == "phonon"
+-    assert contract["features"]["streaming"] is True
++    assert contract["entrypoint"] == "PhononVoice.synthesize_prepared"
++    assert contract["stream_entrypoint"] == "PhononVoice.stream_prepared"
++    assert contract["measure_entrypoint"] == "PhononVoice.measure_prepared"
++    assert contract["input"] == "prepared_text"
++    assert contract["measurement_unit"] == "model_tokens"
++    assert contract["max_input_tokens"] is None
++    assert contract["features"] == {
++        "named_voices": True,
++        "streaming": True,
++        "voice_cloning": False,
++        "word_timings": False,
++        "automatic_chunking": False,
++    }
++
++
++def test_voicerender_style_public_probe_needs_no_model() -> None:
++    required_symbols = (
++        "PhononVoice",
++        "SynthesisConfig",
++        "SynthesisResult",
++        "SynthesisMeasure",
++        "DiscoveredModel",
++        "DescribedVoice",
++        "discover_models",
++        "runtime_identity",
++        "REQUEST_API_VERSION",
++        "request_api_contract",
++    )
++    assert all(hasattr(phononsynth, name) for name in required_symbols)
++
++    assert all(
++        hasattr(phononsynth.PhononVoice, method)
++        for method in (
++            "from_pretrained",
++            "synthesize_prepared",
++            "measure_prepared",
++            "close",
++        )
++    )
++    contract = phononsynth.request_api_contract()
++    assert contract["version"] == phononsynth.REQUEST_API_VERSION == 1
++    assert contract["features"]["named_voices"] is True
++    assert contract["features"]["voice_cloning"] is False
++    assert contract["features"]["word_timings"] is False
+diff --git a/tests/test_voice.py b/tests/test_voice.py
+index ccd6397..cdd137e 100644
+--- a/tests/test_voice.py
++++ b/tests/test_voice.py
+@@ -14,7 +14,11 @@ class Encoded:
+
+
+ class Tokenizer:
++    def __init__(self) -> None:
++        self.encoded_texts: list[str] = []
++
+     def encode(self, text: str, add_special_tokens: bool = True) -> Encoded:
++        self.encoded_texts.append(text)
+         assert text
+         assert add_special_tokens is True
+         return Encoded()
+@@ -192,11 +196,21 @@ def test_runtime_metadata_wins_provenance_key_collisions() -> None:
+     assert result.metadata["release_version"] == "0.2.0"
+
+
+-def test_measure_reports_unknown_runtime_limit() -> None:
+-    measure = model().measure_prepared("hello")
++def test_measurement_preserves_prepared_text_without_runtime_inference() -> None:
++    voice = model()
++    text = "First prepared paragraph.\n\nSecond prepared paragraph."
++
++    measure = voice.measure_prepared(text)
++    assert voice.tokenizer.encoded_texts == [text]
+     assert measure.token_count == 3
+     assert measure.max_tokens is None
+     assert measure.fits is None
++    assert voice.runtime.calls == []
++
++    voice.synthesize_prepared(text)
++    assert voice.tokenizer.encoded_texts == [text, text]
++    assert len(voice.runtime.calls) == 1
++    assert voice.runtime.calls[0][0] == (1, 2, 3)
+
+
+ def test_stream_wraps_runtime_chunks() -> None:

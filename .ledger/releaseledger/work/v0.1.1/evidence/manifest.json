@@ -1,0 +1,30 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 121,
+      "deletions": 12,
+      "patch_file": "0d81378.patch",
+      "patch_sha256": "3fc57f9a39a5a6a3855040d483ca03d4f8186859419aa7f804873cd927952615",
+      "paths": [
+        "phononsynth/__init__.py",
+        "phononsynth/api_contract.py",
+        "phononsynth/voice.py",
+        "pyproject.toml",
+        "tests/test_api.py",
+        "tests/test_voice.py"
+      ],
+      "sha": "0d81378ebedd973246c2db26b86cf994aeed92b0",
+      "short_sha": "0d81378",
+      "source_ref": "git:0d81378ebedd973246c2db26b86cf994aeed92b0"
+    }
+  ],
+  "git_base_ref": "2bf9562cab7a2070263acc85041a7b10859e94f6",
+  "git_base_sha": "2bf9562cab7a2070263acc85041a7b10859e94f6",
+  "git_head_ref": "0d81378ebedd973246c2db26b86cf994aeed92b0",
+  "git_head_sha": "0d81378ebedd973246c2db26b86cf994aeed92b0",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.1.1",
+  "schema_version": 1
+}
