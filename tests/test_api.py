@@ -21,13 +21,13 @@ def test_public_surface() -> None:
     assert expected.issubset(set(phononsynth.__all__))
 
 
-def test_request_api_contract_v1() -> None:
-    assert phononsynth.REQUEST_API_VERSION == 1
+def test_request_api_contract_v2() -> None:
+    assert phononsynth.REQUEST_API_VERSION == 2
     assert type(phononsynth.REQUEST_API_VERSION) is int
 
     contract = phononsynth.request_api_contract()
     assert isinstance(contract, dict)
-    assert contract["version"] == 1
+    assert contract["version"] == 2
     assert type(contract["version"]) is int
     assert contract["engine"] == "phonon"
     assert contract["entrypoint"] == "PhononVoice.synthesize_prepared"
@@ -36,6 +36,7 @@ def test_request_api_contract_v1() -> None:
     assert contract["input"] == "prepared_text"
     assert contract["measurement_unit"] == "model_tokens"
     assert contract["max_input_tokens"] is None
+    assert contract["measurement_fit_is_authoritative"] is True
     assert contract["features"] == {
         "named_voices": True,
         "streaming": True,
@@ -70,7 +71,7 @@ def test_voicerender_style_public_probe_needs_no_model() -> None:
         )
     )
     contract = phononsynth.request_api_contract()
-    assert contract["version"] == phononsynth.REQUEST_API_VERSION == 1
+    assert contract["version"] == phononsynth.REQUEST_API_VERSION == 2
     assert contract["features"]["named_voices"] is True
     assert contract["features"]["voice_cloning"] is False
     assert contract["features"]["word_timings"] is False

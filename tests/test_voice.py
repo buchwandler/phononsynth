@@ -6,7 +6,13 @@ import numpy as np
 import pytest
 from onnxvoice.errors import OptionalDependencyError
 
-from phononsynth import EmptyTextError, ModelInferenceError, PhononVoice, SynthesisConfig
+from phononsynth import (
+    EmptyTextError,
+    ModelInferenceError,
+    PhononVoice,
+    SynthesisConfig,
+    SynthesisMeasure,
+)
 
 
 class Encoded:
@@ -196,7 +202,7 @@ def test_runtime_metadata_wins_provenance_key_collisions() -> None:
     assert result.metadata["release_version"] == "0.2.0"
 
 
-def test_measurement_preserves_prepared_text_without_runtime_inference() -> None:
+def test_measurement_reports_authoritative_fit_without_numeric_maximum() -> None:
     voice = model()
     text = "First prepared paragraph.\n\nSecond prepared paragraph."
 
@@ -204,13 +210,73 @@ def test_measurement_preserves_prepared_text_without_runtime_inference() -> None
     assert voice.tokenizer.encoded_texts == [text]
     assert measure.token_count == 3
     assert measure.max_tokens is None
-    assert measure.fits is None
+    assert measure.fits is True
     assert voice.runtime.calls == []
 
     voice.synthesize_prepared(text)
     assert voice.tokenizer.encoded_texts == [text, text]
     assert len(voice.runtime.calls) == 1
     assert voice.runtime.calls[0][0] == (1, 2, 3)
+
+
+def test_measure_allows_authoritative_fit_without_numeric_maximum() -> None:
+    measure = SynthesisMeasure(
+        token_count=23,
+        max_tokens=None,
+        fits=True,
+        model_id="phonon-demo",
+    )
+    assert measure.fits is True
+
+
+def test_measure_rejects_non_boolean_fit() -> None:
+    with pytest.raises(ValueError, match="fits must be boolean"):
+        SynthesisMeasure(token_count=23, max_tokens=None, fits=None)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("token_count", "max_tokens", "fits"),
+    [(5, 5, True), (6, 5, False)],
+)
+def test_measure_accepts_consistent_finite_maximum(
+    token_count: int, max_tokens: int, fits: bool
+) -> None:
+    measure = SynthesisMeasure(token_count, max_tokens, fits)
+    assert measure.fits is fits
+
+
+@pytest.mark.parametrize(
+    ("token_count", "max_tokens", "fits"),
+    [(5, 5, False), (6, 5, True)],
+)
+def test_measure_rejects_inconsistent_finite_maximum(
+    token_count: int, max_tokens: int, fits: bool
+) -> None:
+    with pytest.raises(ValueError, match="fits must match token_count and max_tokens"):
+        SynthesisMeasure(token_count, max_tokens, fits)
+
+
+@pytest.mark.parametrize("max_tokens", [0, -1])
+def test_measure_rejects_non_positive_maximum(max_tokens: int) -> None:
+    with pytest.raises(ValueError, match="max_tokens must be positive"):
+        SynthesisMeasure(token_count=1, max_tokens=max_tokens, fits=False)
+
+
+def test_measure_rejects_bool_as_integer() -> None:
+    with pytest.raises(ValueError, match="token_count must be an integer"):
+        SynthesisMeasure(token_count=True, max_tokens=None, fits=True)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="max_tokens must be an integer or None"):
+        SynthesisMeasure(token_count=1, max_tokens=True, fits=True)  # type: ignore[arg-type]
+
+
+def test_measure_preserves_closed_voice_and_empty_text_errors() -> None:
+    voice = model()
+    with pytest.raises(EmptyTextError):
+        voice.measure_prepared(" \t")
+
+    voice.close()
+    with pytest.raises(RuntimeError, match="PhononVoice is closed"):
+        voice.measure_prepared("hello")
 
 
 def test_stream_wraps_runtime_chunks() -> None:

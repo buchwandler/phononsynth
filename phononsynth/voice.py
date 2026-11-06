@@ -194,7 +194,7 @@ class PhononVoice:
         return SynthesisMeasure(
             token_count=len(token_ids),
             max_tokens=None,
-            fits=None,
+            fits=True,
             model_id=self.model_id,
         )
 

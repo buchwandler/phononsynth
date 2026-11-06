@@ -7,5 +7,5 @@ This MVP was derived from the supplied repository snapshots rather than from a s
 - **Streaming:** Phonon exposes native streaming PCM, so the wrapper adds `stream_prepared` / `stream_text` rather than collecting all output unconditionally.
 - **Tokenizer boundary:** OnnxVoice's Phonon adapter accepts already-tokenized integer IDs. Phonon bundles require `tokenizer.json`, so this package uses Hugging Face `tokenizers` to convert prepared text to model IDs before calling the adapter.
 - **Local layout:** fixed to the supplied Phonon bundle ABI: four ONNX graphs, `config.json`, `tokenizer.json`, and `voices/<name>.bin` prompts.
-- **Input capacity:** the OnnxVoice Phonon options contract reports no declared maximum input-token limit. `measure_prepared` therefore reports the exact tokenizer count but leaves `max_tokens` and `fits` unknown.
+- **Input capacity:** no finite text-token maximum is declared by the OnnxVoice Phonon contract. `measure_prepared` returns the exact tokenizer count and an authoritative per-request fit result. `max_tokens=None` means no finite maximum is declared, not that fit is unknown.
 - **Licensing:** discovery preserves catalog model-license metadata. The supplied registry marks 31m English Apache-2.0/commercial and 40m variants CC-BY-NC-4.0/non-commercial.

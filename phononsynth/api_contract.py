@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-REQUEST_API_VERSION = 1
+REQUEST_API_VERSION = 2
 
 
 class RequestApiFeatures(TypedDict):
@@ -22,6 +22,7 @@ class RequestApiContract(TypedDict):
     input: str
     measurement_unit: str
     max_input_tokens: int | None
+    measurement_fit_is_authoritative: bool
     features: RequestApiFeatures
 
 
@@ -35,6 +36,7 @@ def request_api_contract() -> RequestApiContract:
         "input": "prepared_text",
         "measurement_unit": "model_tokens",
         "max_input_tokens": None,
+        "measurement_fit_is_authoritative": True,
         "features": {
             "named_voices": True,
             "streaming": True,

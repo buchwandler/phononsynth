@@ -56,16 +56,21 @@ class SynthesisResult:
 class SynthesisMeasure:
     token_count: int
     max_tokens: int | None
-    fits: bool | None
+    fits: bool
     model_id: str | None = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.token_count, bool) or self.token_count < 0:
+        if isinstance(self.token_count, bool) or not isinstance(self.token_count, int):
+            raise ValueError("token_count must be an integer")
+        if self.token_count < 0:
             raise ValueError("token_count must be a non-negative integer")
-        if self.max_tokens is None:
-            if self.fits is not None:
-                raise ValueError("fits must be None when max_tokens is unknown")
-        else:
+
+        if not isinstance(self.fits, bool):
+            raise ValueError("fits must be boolean")
+
+        if self.max_tokens is not None:
+            if isinstance(self.max_tokens, bool) or not isinstance(self.max_tokens, int):
+                raise ValueError("max_tokens must be an integer or None")
             if self.max_tokens <= 0:
                 raise ValueError("max_tokens must be positive")
             if self.fits is not (self.token_count <= self.max_tokens):
