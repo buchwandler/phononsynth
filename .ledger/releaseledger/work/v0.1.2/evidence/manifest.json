@@ -1,0 +1,32 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 93,
+      "deletions": 17,
+      "patch_file": "0dcef1e.patch",
+      "patch_sha256": "a41a63ebbb8e22299060d4fd4e017d1d98d47468a4f7a1babfd9f6bb4cb9faae",
+      "paths": [
+        "README.md",
+        "SOURCE_NOTES.md",
+        "docs/architecture.md",
+        "phononsynth/api_contract.py",
+        "phononsynth/types.py",
+        "phononsynth/voice.py",
+        "tests/test_api.py",
+        "tests/test_voice.py"
+      ],
+      "sha": "0dcef1e203cdfca9e751fe752bb0e10a70efea00",
+      "short_sha": "0dcef1e",
+      "source_ref": "git:0dcef1e203cdfca9e751fe752bb0e10a70efea00"
+    }
+  ],
+  "git_base_ref": "da83767961e3b60f76738f5b83407668f9bcb6a2",
+  "git_base_sha": "da83767961e3b60f76738f5b83407668f9bcb6a2",
+  "git_head_ref": "0dcef1e203cdfca9e751fe752bb0e10a70efea00",
+  "git_head_sha": "0dcef1e203cdfca9e751fe752bb0e10a70efea00",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.1.2",
+  "schema_version": 1
+}

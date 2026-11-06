@@ -1,0 +1,31 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.1.2
+git_base_ref: da83767961e3b60f76738f5b83407668f9bcb6a2
+git_base_sha: da83767961e3b60f76738f5b83407668f9bcb6a2
+git_head_ref: 0dcef1e203cdfca9e751fe752bb0e10a70efea00
+git_head_sha: 0dcef1e203cdfca9e751fe752bb0e10a70efea00
+include_merges: nontrivial
+entries:
+  - kind: changed
+    summary: Changed request API v2 to report authoritative fit results when no finite input-token maximum is declared
+    status: accepted
+    source_refs:
+      - git:0dcef1e203cdfca9e751fe752bb0e10a70efea00
+    paths:
+      - README.md
+      - SOURCE_NOTES.md
+      - docs/architecture.md
+      - phononsynth/api_contract.py
+      - phononsynth/types.py
+      - phononsynth/voice.py
+      - tests/test_api.py
+      - tests/test_voice.py
+    sources:
+      - git:0dcef1e203cdfca9e751fe752bb0e10a70efea00
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

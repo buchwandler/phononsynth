@@ -1,0 +1,260 @@
+ README.md                   |  2 +-
+ SOURCE_NOTES.md             |  2 +-
+ docs/architecture.md        |  2 ++
+ phononsynth/api_contract.py |  4 ++-
+ phononsynth/types.py        | 17 +++++++----
+ phononsynth/voice.py        |  2 +-
+ tests/test_api.py           |  9 +++---
+ tests/test_voice.py         | 72 +++++++++++++++++++++++++++++++++++++++++++--
+ 8 files changed, 93 insertions(+), 17 deletions(-)
+
+diff --git a/README.md b/README.md
+index f034005..55e60f0 100644
+--- a/README.md
++++ b/README.md
+@@ -75,7 +75,7 @@ with PhononVoice.from_local(bundle_dir="bundle") as model:
+
+ The CLI exposes `--voice`, `--duration-delta`, `--temperature`, `--seed`, `--eos-threshold`, `--frames-after-eos`, `--min-frames-before-eos`, and `--max-frames`. The Python API accepts these individually or through `SynthesisConfig`, but not both in one call. Unset controls use bundle defaults when present. Missing controls use Phonon-compatible defaults, including temperature 0.3, one frame after EOS, six frames before EOS detection, and a token-length-based frame cap.
+
+-PhononSynth uses the installed bundle tokenizer and validates empty text before inference. The current Phonon runtime contract does not declare a maximum input-token limit, so `measure_prepared()` reports a real token count with `max_tokens=None` and `fits=None`. PhononSynth does not invent a limit or automatically split long text.
++PhononSynth uses the installed bundle tokenizer to measure the exact prepared request. The current Phonon runtime does not declare a finite text-token maximum, so `measure_prepared()` returns `max_tokens=None`. Successful measurement nevertheless returns `fits=True`: the exact request satisfies all declared PhononSynth input-capacity constraints. PhononSynth does not invent a finite token limit and does not automatically split long text.
+
+ ## Model licenses
+
+diff --git a/SOURCE_NOTES.md b/SOURCE_NOTES.md
+index 7acf884..010ff00 100644
+--- a/SOURCE_NOTES.md
++++ b/SOURCE_NOTES.md
+@@ -7,5 +7,5 @@ This MVP was derived from the supplied repository snapshots rather than from a s
+ - **Streaming:** Phonon exposes native streaming PCM, so the wrapper adds `stream_prepared` / `stream_text` rather than collecting all output unconditionally.
+ - **Tokenizer boundary:** OnnxVoice's Phonon adapter accepts already-tokenized integer IDs. Phonon bundles require `tokenizer.json`, so this package uses Hugging Face `tokenizers` to convert prepared text to model IDs before calling the adapter.
+ - **Local layout:** fixed to the supplied Phonon bundle ABI: four ONNX graphs, `config.json`, `tokenizer.json`, and `voices/<name>.bin` prompts.
+-- **Input capacity:** the OnnxVoice Phonon options contract reports no declared maximum input-token limit. `measure_prepared` therefore reports the exact tokenizer count but leaves `max_tokens` and `fits` unknown.
++- **Input capacity:** no finite text-token maximum is declared by the OnnxVoice Phonon contract. `measure_prepared` returns the exact tokenizer count and an authoritative per-request fit result. `max_tokens=None` means no finite maximum is declared, not that fit is unknown.
+ - **Licensing:** discovery preserves catalog model-license metadata. The supplied registry marks 31m English Apache-2.0/commercial and 40m variants CC-BY-NC-4.0/non-commercial.
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 4ce4d3a..361d562 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -21,3 +21,5 @@ onnxvoice PhononAdapter
+ ```
+
+ `phononsynth` owns the text-facing convenience layer and fills generation controls omitted by older bundles with Phonon-compatible defaults. OnnxVoice owns catalogs, installation, verification, provider selection, sessions, the runtime ABI, voice prompt loading, bundle generation defaults, and diagnostics.
++
++PhononSynth measures prepared text with the bundle tokenizer only and does not run acoustic inference during measurement. The current Phonon runtime contract declares no finite text-token maximum, so request API v2 returns the exact token count with `max_tokens=None` and `fits=True` after successful measurement. The fit result means the request satisfies all declared PhononSynth input-capacity constraints, not that every inference will avoid resource failures. Long-form splitting and orchestration remain upstream; PhononSynth does not automatically split text.
+diff --git a/phononsynth/api_contract.py b/phononsynth/api_contract.py
+index 416e1e8..de43f94 100644
+--- a/phononsynth/api_contract.py
++++ b/phononsynth/api_contract.py
+@@ -2,7 +2,7 @@ from __future__ import annotations
+
+ from typing import TypedDict
+
+-REQUEST_API_VERSION = 1
++REQUEST_API_VERSION = 2
+
+
+ class RequestApiFeatures(TypedDict):
+@@ -22,6 +22,7 @@ class RequestApiContract(TypedDict):
+     input: str
+     measurement_unit: str
+     max_input_tokens: int | None
++    measurement_fit_is_authoritative: bool
+     features: RequestApiFeatures
+
+
+@@ -35,6 +36,7 @@ def request_api_contract() -> RequestApiContract:
+         "input": "prepared_text",
+         "measurement_unit": "model_tokens",
+         "max_input_tokens": None,
++        "measurement_fit_is_authoritative": True,
+         "features": {
+             "named_voices": True,
+             "streaming": True,
+diff --git a/phononsynth/types.py b/phononsynth/types.py
+index baf4700..9ecc797 100644
+--- a/phononsynth/types.py
++++ b/phononsynth/types.py
+@@ -56,16 +56,21 @@ class SynthesisResult:
+ class SynthesisMeasure:
+     token_count: int
+     max_tokens: int | None
+-    fits: bool | None
++    fits: bool
+     model_id: str | None = None
+
+     def __post_init__(self) -> None:
+-        if isinstance(self.token_count, bool) or self.token_count < 0:
++        if isinstance(self.token_count, bool) or not isinstance(self.token_count, int):
++            raise ValueError("token_count must be an integer")
++        if self.token_count < 0:
+             raise ValueError("token_count must be a non-negative integer")
+-        if self.max_tokens is None:
+-            if self.fits is not None:
+-                raise ValueError("fits must be None when max_tokens is unknown")
+-        else:
++
++        if not isinstance(self.fits, bool):
++            raise ValueError("fits must be boolean")
++
++        if self.max_tokens is not None:
++            if isinstance(self.max_tokens, bool) or not isinstance(self.max_tokens, int):
++                raise ValueError("max_tokens must be an integer or None")
+             if self.max_tokens <= 0:
+                 raise ValueError("max_tokens must be positive")
+             if self.fits is not (self.token_count <= self.max_tokens):
+diff --git a/phononsynth/voice.py b/phononsynth/voice.py
+index 888aebb..bbeb05c 100644
+--- a/phononsynth/voice.py
++++ b/phononsynth/voice.py
+@@ -194,7 +194,7 @@ class PhononVoice:
+         return SynthesisMeasure(
+             token_count=len(token_ids),
+             max_tokens=None,
+-            fits=None,
++            fits=True,
+             model_id=self.model_id,
+         )
+
+diff --git a/tests/test_api.py b/tests/test_api.py
+index ccdd1f8..52a7576 100644
+--- a/tests/test_api.py
++++ b/tests/test_api.py
+@@ -21,13 +21,13 @@ def test_public_surface() -> None:
+     assert expected.issubset(set(phononsynth.__all__))
+
+
+-def test_request_api_contract_v1() -> None:
+-    assert phononsynth.REQUEST_API_VERSION == 1
++def test_request_api_contract_v2() -> None:
++    assert phononsynth.REQUEST_API_VERSION == 2
+     assert type(phononsynth.REQUEST_API_VERSION) is int
+
+     contract = phononsynth.request_api_contract()
+     assert isinstance(contract, dict)
+-    assert contract["version"] == 1
++    assert contract["version"] == 2
+     assert type(contract["version"]) is int
+     assert contract["engine"] == "phonon"
+     assert contract["entrypoint"] == "PhononVoice.synthesize_prepared"
+@@ -36,6 +36,7 @@ def test_request_api_contract_v1() -> None:
+     assert contract["input"] == "prepared_text"
+     assert contract["measurement_unit"] == "model_tokens"
+     assert contract["max_input_tokens"] is None
++    assert contract["measurement_fit_is_authoritative"] is True
+     assert contract["features"] == {
+         "named_voices": True,
+         "streaming": True,
+@@ -70,7 +71,7 @@ def test_voicerender_style_public_probe_needs_no_model() -> None:
+         )
+     )
+     contract = phononsynth.request_api_contract()
+-    assert contract["version"] == phononsynth.REQUEST_API_VERSION == 1
++    assert contract["version"] == phononsynth.REQUEST_API_VERSION == 2
+     assert contract["features"]["named_voices"] is True
+     assert contract["features"]["voice_cloning"] is False
+     assert contract["features"]["word_timings"] is False
+diff --git a/tests/test_voice.py b/tests/test_voice.py
+index cdd137e..9701ae5 100644
+--- a/tests/test_voice.py
++++ b/tests/test_voice.py
+@@ -6,7 +6,13 @@ import numpy as np
+ import pytest
+ from onnxvoice.errors import OptionalDependencyError
+
+-from phononsynth import EmptyTextError, ModelInferenceError, PhononVoice, SynthesisConfig
++from phononsynth import (
++    EmptyTextError,
++    ModelInferenceError,
++    PhononVoice,
++    SynthesisConfig,
++    SynthesisMeasure,
++)
+
+
+ class Encoded:
+@@ -196,7 +202,7 @@ def test_runtime_metadata_wins_provenance_key_collisions() -> None:
+     assert result.metadata["release_version"] == "0.2.0"
+
+
+-def test_measurement_preserves_prepared_text_without_runtime_inference() -> None:
++def test_measurement_reports_authoritative_fit_without_numeric_maximum() -> None:
+     voice = model()
+     text = "First prepared paragraph.\n\nSecond prepared paragraph."
+
+@@ -204,7 +210,7 @@ def test_measurement_preserves_prepared_text_without_runtime_inference() -> None
+     assert voice.tokenizer.encoded_texts == [text]
+     assert measure.token_count == 3
+     assert measure.max_tokens is None
+-    assert measure.fits is None
++    assert measure.fits is True
+     assert voice.runtime.calls == []
+
+     voice.synthesize_prepared(text)
+@@ -213,6 +219,66 @@ def test_measurement_preserves_prepared_text_without_runtime_inference() -> None
+     assert voice.runtime.calls[0][0] == (1, 2, 3)
+
+
++def test_measure_allows_authoritative_fit_without_numeric_maximum() -> None:
++    measure = SynthesisMeasure(
++        token_count=23,
++        max_tokens=None,
++        fits=True,
++        model_id="phonon-demo",
++    )
++    assert measure.fits is True
++
++
++def test_measure_rejects_non_boolean_fit() -> None:
++    with pytest.raises(ValueError, match="fits must be boolean"):
++        SynthesisMeasure(token_count=23, max_tokens=None, fits=None)  # type: ignore[arg-type]
++
++
++@pytest.mark.parametrize(
++    ("token_count", "max_tokens", "fits"),
++    [(5, 5, True), (6, 5, False)],
++)
++def test_measure_accepts_consistent_finite_maximum(
++    token_count: int, max_tokens: int, fits: bool
++) -> None:
++    measure = SynthesisMeasure(token_count, max_tokens, fits)
++    assert measure.fits is fits
++
++
++@pytest.mark.parametrize(
++    ("token_count", "max_tokens", "fits"),
++    [(5, 5, False), (6, 5, True)],
++)
++def test_measure_rejects_inconsistent_finite_maximum(
++    token_count: int, max_tokens: int, fits: bool
++) -> None:
++    with pytest.raises(ValueError, match="fits must match token_count and max_tokens"):
++        SynthesisMeasure(token_count, max_tokens, fits)
++
++
++@pytest.mark.parametrize("max_tokens", [0, -1])
++def test_measure_rejects_non_positive_maximum(max_tokens: int) -> None:
++    with pytest.raises(ValueError, match="max_tokens must be positive"):
++        SynthesisMeasure(token_count=1, max_tokens=max_tokens, fits=False)
++
++
++def test_measure_rejects_bool_as_integer() -> None:
++    with pytest.raises(ValueError, match="token_count must be an integer"):
++        SynthesisMeasure(token_count=True, max_tokens=None, fits=True)  # type: ignore[arg-type]
++    with pytest.raises(ValueError, match="max_tokens must be an integer or None"):
++        SynthesisMeasure(token_count=1, max_tokens=True, fits=True)  # type: ignore[arg-type]
++
++
++def test_measure_preserves_closed_voice_and_empty_text_errors() -> None:
++    voice = model()
++    with pytest.raises(EmptyTextError):
++        voice.measure_prepared(" \t")
++
++    voice.close()
++    with pytest.raises(RuntimeError, match="PhononVoice is closed"):
++        voice.measure_prepared("hello")
++
++
+ def test_stream_wraps_runtime_chunks() -> None:
+     chunks = list(model().stream_prepared("hello", voice="mira", seed=1))
+     assert [chunk.frame_index for chunk in chunks] == [0, 1]

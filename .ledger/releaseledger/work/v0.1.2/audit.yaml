@@ -1,0 +1,36 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: v0.1.2
+git_base_ref: v0.1.1
+git_base_sha: da83767961e3b60f76738f5b83407668f9bcb6a2
+git_head_ref: HEAD
+git_head_sha: 0dcef1e203cdfca9e751fe752bb0e10a70efea00
+git_range: da83767961e3b60f76738f5b83407668f9bcb6a2..0dcef1e203cdfca9e751fe752bb0e10a70efea00
+commit_count: 1
+rows:
+  - sha: 0dcef1e203cdfca9e751fe752bb0e10a70efea00
+    source_ref: git:0dcef1e203cdfca9e751fe752bb0e10a70efea00
+    short_sha: 0dcef1e
+    changed_paths:
+      - README.md
+      - SOURCE_NOTES.md
+      - docs/architecture.md
+      - phononsynth/api_contract.py
+      - phononsynth/types.py
+      - phononsynth/voice.py
+      - tests/test_api.py
+      - tests/test_voice.py
+    stats:
+      files_changed: 8
+      insertions: 93
+      deletions: 17
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: fix api for voicerender"

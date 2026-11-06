@@ -1,0 +1,19 @@
+rows:
+  - sha: 0dcef1e203cdfca9e751fe752bb0e10a70efea00
+    inspected: true
+    inspected_paths:
+      - README.md
+      - SOURCE_NOTES.md
+      - docs/architecture.md
+      - phononsynth/api_contract.py
+      - phononsynth/types.py
+      - phononsynth/voice.py
+      - tests/test_api.py
+      - tests/test_voice.py
+    observed_behavior: "Request API v2 makes fit measurement authoritative: successful tokenization reports fits=true when no finite maximum is declared, and SynthesisMeasure validates boolean fits and finite maximum consistency."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
